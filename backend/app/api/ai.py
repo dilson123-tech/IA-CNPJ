@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import traceback
 
 from datetime import datetime
@@ -102,10 +103,21 @@ def consult(payload: AiConsultRequest, db: Session = Depends(get_db)):
         )
 
     except Exception as e:
-        tb = traceback.format_exc(limit=6)
-        raise HTTPException(status_code=500, detail={
+
+        env = os.getenv('ENV', 'lab')
+
+        detail = {
+
             'error_code': 'AI_CONSULT_FAILED',
+
             'message': str(e),
+
             'hint': 'Verifique logs do uvicorn e valide /reports/context para o mesmo período.',
-            'trace': tb,
-        })
+
+        }
+
+        if env == 'lab':
+
+            detail['trace'] = traceback.format_exc(limit=6)
+
+        raise HTTPException(status_code=500, detail=detail)
