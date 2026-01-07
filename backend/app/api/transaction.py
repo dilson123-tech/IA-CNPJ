@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -29,7 +30,8 @@ def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db)
         kind=payload.kind,
         amount_cents=payload.amount_cents,
         description=payload.description or "",
-    )
+       occurred_at=getattr(payload, "occurred_at", None) or datetime.utcnow(),
+ )
     db.add(t)
     db.commit()
     db.refresh(t)
