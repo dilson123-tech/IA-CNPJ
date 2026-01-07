@@ -1,3 +1,7 @@
 
 # local patch backups (do not commit)
 *.bak_*
+
+# local sqlite (do not commit)
+lab.db
+*.db
