@@ -1,36 +1,73 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, date, time, timezone
-from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, func, case
+from datetime import datetime, date, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func, case, select, desc
 
 from app.db import get_db
 from app.models.transaction import Transaction
+from app.models.company import Company
 from app.models.category import Category
-from app.schemas.reports import (
-    Period, Totals, CategoryBreakdown,
-    SummaryResponse, DailyPoint, DailyResponse,
-    TransactionBrief, ContextResponse
-)
+from app.schemas.reports import CategoryBreakdown, ContextResponse, DailyResponse, Period, SummaryResponse, TopCategoriesResponse, Totals, TransactionBrief
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
 def _parse_iso_date_or_datetime(s: str, *, is_end: bool) -> datetime:
-    s = s.strip()
-    # datetime ISO
-    if "T" in s:
-        # suporta Z
-        s2 = s.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(s2)
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt
-    # date YYYY-MM-DD
-    d = date.fromisoformat(s)
-    return datetime.combine(d, time.max if is_end else time.min)
+    """Aceita ISO date (YYYY-MM-DD) ou ISO datetime (YYYY-MM-DDTHH:MM:SS[.fff][Z|±HH:MM]).
+    Para date-only:
+      - start => 00:00:00
+      - end   => 23:59:59.999999
+    """
+    raw = (s or "").strip()
+    if not raw:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "INVALID_DATE", "message": "Data vazia", "value": s},
+        )
 
+    s2 = raw.replace(" ", "T")
+    if s2.endswith("Z"):
+        s2 = s2[:-1] + "+00:00"
+
+    # tenta datetime
+    if "T" in s2:
+        try:
+            dt = datetime.fromisoformat(s2)
+            # normaliza tz-aware pra naive (backend usa naive)
+            return dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
+        except Exception:
+            pass
+
+    # tenta date-only (pega os 10 primeiros chars pra aceitar "YYYY-MM-DD..." também)
+    try:
+        from datetime import date as _date
+        d = _date.fromisoformat(s2[:10])
+    except Exception:
+        field = "end" if is_end else "start"
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "INVALID_DATE",
+                "field": field,
+                "value": raw,
+                "expected": ["YYYY-MM-DD", "YYYY-MM-DDTHH:MM:SS"],
+            },
+        )
+
+    if is_end:
+        return datetime(d.year, d.month, d.day, 23, 59, 59, 999999)
+    return datetime(d.year, d.month, d.day, 0, 0, 0)
+
+def _ensure_company(db: Session, company_id: int) -> None:
+    if db.get(Company, company_id) is None:
+        raise HTTPException(status_code=404, detail={
+            'error_code': 'COMPANY_NOT_FOUND',
+            'company_id': company_id,
+            'message': 'Empresa não encontrada',
+        })
 
 def _resolve_period(start: str | None, end: str | None) -> tuple[datetime, datetime, Period]:
     now = datetime.utcnow()
@@ -49,7 +86,12 @@ def _resolve_period(start: str | None, end: str | None) -> tuple[datetime, datet
         end_dt = _parse_iso_date_or_datetime(end, is_end=True)
 
     if start_dt > end_dt:
-        raise HTTPException(status_code=400, detail="start must be <= end")
+        raise HTTPException(status_code=422, detail={
+            'error_code': 'INVALID_PERIOD',
+            'message': 'start não pode ser maior que end',
+            'start': start_dt.date().isoformat(),
+            'end': end_dt.date().isoformat(),
+        })
 
     period = Period(start=start_dt.date().isoformat(), end=end_dt.date().isoformat())
     return start_dt, end_dt, period
@@ -230,3 +272,30 @@ def context(
         by_category=by_cat,
         recent_transactions=recent,
     )
+
+
+@router.get("/top-categories", response_model=TopCategoriesResponse)
+def top_categories(
+    company_id: int,
+    start: str | None = None,
+    end: str | None = None,
+    metric: str = "saidas",
+    limit: int = 5,
+    db: Session = Depends(get_db),
+):
+    _ensure_company(db, company_id)
+    start_dt, end_dt, period = _resolve_period(start, end)
+    items = _by_category(db, company_id, start_dt, end_dt)
+
+    m = (metric or "saidas").lower().strip()
+    if m not in ("entradas", "saidas", "saldo"):
+        raise HTTPException(status_code=422, detail={
+            "error_code": "INVALID_METRIC",
+            "message": "metric inválida (use: entradas | saidas | saldo)",
+            "value": metric,
+        })
+
+    key = (lambda c: c.entradas_cents) if m == "entradas" else (lambda c: c.saidas_cents) if m == "saidas" else (lambda c: abs(c.saldo_cents))
+    items = sorted(items, key=key, reverse=True)[: max(1, min(limit, 20))]
+
+    return TopCategoriesResponse(company_id=company_id, period=period, metric=m, items=items)

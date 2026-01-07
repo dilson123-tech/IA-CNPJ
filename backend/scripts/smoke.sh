@@ -21,7 +21,11 @@ curl -sS --max-time 6 "$BASE/reports/context?company_id=$COMPANY_ID&start=$START
 echo "OK"
 echo
 
-echo "[3/3] /ai/consult"
+echo "[3/4] /reports/top-categories
+curl -sS --max-time 6 "$BASE/reports/top-categories?company_id=$COMPANY_ID&start=$START&end=$END&metric=saidas&limit=5" | jq -e . >/dev/null
+echo "OK"
+
+[4/4] /ai/consult"
 curl -sS --max-time 6 -H 'Content-Type: application/json' \
   -d '{"company_id":'"$COMPANY_ID"',"start":"'"$START"'","end":"'"$END"'","limit":10,"question":"smoke"}' \
   "$BASE/ai/consult" \

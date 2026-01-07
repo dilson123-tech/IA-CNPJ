@@ -25,6 +25,7 @@ def _fmt_brl(cents: int) -> str:
 @router.post("/consult", response_model=AiConsultResponse)
 def consult(payload: AiConsultRequest, db: Session = Depends(get_db)):
     try:
+        rep._ensure_company(db, payload.company_id)
         # reaproveita helpers do reports (mesma lógica do período)
         start_dt, end_dt, period = rep._resolve_period(payload.start, payload.end)
         totals: Totals = rep._totals_row(db, payload.company_id, start_dt, end_dt)
@@ -102,8 +103,12 @@ def consult(payload: AiConsultRequest, db: Session = Depends(get_db)):
             recent_transactions=ctx.recent_transactions,  # já vem no formato schema
         )
 
-    except Exception as e:
+    except HTTPException:
 
+        raise
+
+
+    except Exception as e:
         env = os.getenv('ENV', 'lab')
 
         detail = {

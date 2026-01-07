@@ -61,3 +61,10 @@ class ContextResponse(BaseModel):
     totals: Totals
     by_category: list[CategoryBreakdown]
     recent_transactions: list[TransactionBrief]
+
+
+class TopCategoriesResponse(BaseModel):
+    company_id: int
+    period: Period
+    metric: str
+    items: list[CategoryBreakdown]
