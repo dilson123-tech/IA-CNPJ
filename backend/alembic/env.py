@@ -6,6 +6,8 @@ from sqlalchemy import pool
 from alembic import context
 from app.db import Base
 from app.models.company import Company  # noqa: F401
+from app.models.transaction import Transaction  # noqa: F401
+from app.models.category import Category  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
