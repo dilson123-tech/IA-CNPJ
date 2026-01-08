@@ -13,3 +13,26 @@ Este repositório é separado do Aurea Gold para manter estabilidade, compliance
 1. Mudanças seguem o PDF Diário (8h). Ideias fora disso entram no Backlog.
 2. Um comando por vez + testes determinísticos (curl) antes de UI.
 3. LAB ≠ PROD. Nada quebra o estável.
+
+## Data Quality (categorias)
+
+### Listar transações sem categoria
+```bash
+curl -sS "http://127.0.0.1:8100/transactions/uncategorized?company_id=1&start=2026-01-01&end=2026-01-31&limit=50" | jq
+```
+
+### Setar categoria de uma transação (PATCH)
+```bash
+curl -sS -X PATCH "http://127.0.0.1:8100/transactions/3/category?company_id=1" \
+  -H 'Content-Type: application/json' \
+  -d '{"category_id":1}' | jq
+```
+
+### Categorizar em lote (bulk-categorize)
+**Formato suportado:** `items: [{id, category_id}]`
+```bash
+curl -sS "http://127.0.0.1:8100/transactions/uncategorized?company_id=1&start=2026-01-01&end=2026-01-31&limit=200" \
+| jq '{company_id: 1, items: map({id: .id, category_id: 1})}' \
+| curl -sS -X POST "http://127.0.0.1:8100/transactions/bulk-categorize" \
+  -H 'Content-Type: application/json' -d @- | jq
+```

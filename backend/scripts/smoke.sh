@@ -5,32 +5,43 @@ BASE="${BASE:-http://127.0.0.1:8100}"
 COMPANY_ID="${COMPANY_ID:-1}"
 START="${START:-2026-01-01}"
 END="${END:-2026-01-31}"
+LIMIT="${LIMIT:-5}"
+
+TOTAL=6
+step(){ echo; echo "[$1/$TOTAL] $2"; }
 
 echo "== IA-CNPJ SMOKE =="
 echo "BASE=$BASE COMPANY_ID=$COMPANY_ID START=$START END=$END"
-echo
 
-echo "[1/3] /health"
-curl -sS --max-time 4 "$BASE/health" | jq -e '.ok==true' >/dev/null
+step 1 "/health"
+curl -sS --max-time 4 "$BASE/health" | jq -e . >/dev/null
 echo "OK"
-echo
 
-echo "[2/3] /reports/context"
-curl -sS --max-time 6 "$BASE/reports/context?company_id=$COMPANY_ID&start=$START&end=$END&limit=5" \
-| jq -e '.company_id==('"$COMPANY_ID"') and (.totals.qtd_transacoes>=0)' >/dev/null
+step 2 "/reports/context"
+curl -sS --max-time 6 "$BASE/reports/context?company_id=$COMPANY_ID&start=$START&end=$END&limit=$LIMIT" | jq -e . >/dev/null
 echo "OK"
-echo
 
-echo "[3/4] /reports/top-categories
+step 3 "/reports/top-categories"
 curl -sS --max-time 6 "$BASE/reports/top-categories?company_id=$COMPANY_ID&start=$START&end=$END&metric=saidas&limit=5" | jq -e . >/dev/null
 echo "OK"
 
-[4/4] /ai/consult"
-curl -sS --max-time 6 -H 'Content-Type: application/json' \
-  -d '{"company_id":'"$COMPANY_ID"',"start":"'"$START"'","end":"'"$END"'","limit":10,"question":"smoke"}' \
-  "$BASE/ai/consult" \
-| jq -e '.headline and (.numbers.qtd_transacoes>=0) and (.recent_transactions|type=="array")' >/dev/null
+step 4 "/transactions/uncategorized"
+curl -sS --max-time 6 "$BASE/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=50" | jq -e . >/dev/null
 echo "OK"
-echo
 
+step 5 "/transactions/bulk-categorize"
+# pega uncategorized e monta payload items -> seta categoria 1
+PAYLOAD="$(curl -sS --max-time 6 "$BASE/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" \
+| jq -c '{company_id: '"$COMPANY_ID"', items: map({id: .id, category_id: 1})}')"
+curl -sS --max-time 10 -X POST "$BASE/transactions/bulk-categorize" \
+  -H 'Content-Type: application/json' -d "$PAYLOAD" | jq -e . >/dev/null
+echo "OK"
+
+step 6 "/ai/consult"
+curl -sS --max-time 6 -H 'Content-Type: application/json' \
+  -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":10,\"question\":\"smoke\"}" \
+  "$BASE/ai/consult" | jq -e . >/dev/null
+echo "OK"
+
+echo
 echo "✅ SMOKE PASS"

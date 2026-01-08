@@ -20,3 +20,21 @@ class TransactionOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class TransactionCategoryPatch(BaseModel):
+    category_id: int | None = Field(default=None, description="Categoria (ou null para limpar)")
+
+class BulkCategorizeItem(BaseModel):
+    id: int
+    category_id: int | None = Field(default=None)
+
+class BulkCategorizeRequest(BaseModel):
+    company_id: int
+    items: list[BulkCategorizeItem] = Field(default_factory=list)
+
+class BulkCategorizeResponse(BaseModel):
+    company_id: int
+    updated: int
+    missing_ids: list[int] = Field(default_factory=list)
+    skipped_ids: list[int] = Field(default_factory=list)
+    invalid_category_ids: list[int] = Field(default_factory=list)
