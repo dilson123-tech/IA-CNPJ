@@ -36,3 +36,20 @@ curl -sS "http://127.0.0.1:8100/transactions/uncategorized?company_id=1&start=20
 | curl -sS -X POST "http://127.0.0.1:8100/transactions/bulk-categorize" \
   -H 'Content-Type: application/json' -d @- | jq
 ```
+
+### Aplicar sugestões automaticamente (1 comando)
+- Faz **dry-run** (mostra quantas seriam categorizadas)
+- Depois **aplica** de verdade (atualiza no banco)
+
+```bash
+API="http://127.0.0.1:8100"
+
+# dry-run (não altera nada)
+curl -sS -X POST \
+"$API/transactions/apply-suggestions?company_id=1&start=2026-01-01&end=2026-01-31&limit=200&dry_run=true" | jq
+
+# apply (altera)
+curl -sS -X POST \
+"$API/transactions/apply-suggestions?company_id=1&start=2026-01-01&end=2026-01-31&limit=200" | jq
+```
+

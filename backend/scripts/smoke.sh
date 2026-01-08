@@ -7,7 +7,7 @@ START="${START:-2026-01-01}"
 END="${END:-2026-01-31}"
 LIMIT="${LIMIT:-5}"
 
-TOTAL=6
+TOTAL=8
 step(){ echo; echo "[$1/$TOTAL] $2"; }
 
 echo "== IA-CNPJ SMOKE =="
@@ -37,7 +37,16 @@ curl -sS --max-time 10 -X POST "$BASE/transactions/bulk-categorize" \
   -H 'Content-Type: application/json' -d "$PAYLOAD" | jq -e . >/dev/null
 echo "OK"
 
-step 6 "/ai/consult"
+
+step 6 "/transactions/apply-suggestions (dry-run)"
+curl -sS --max-time 8 -X POST   "$BASE/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200&dry_run=true" | jq -e . >/dev/null
+echo "OK"
+
+step 7 "/transactions/apply-suggestions (apply)"
+curl -sS --max-time 8 -X POST   "$BASE/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" | jq -e . >/dev/null
+echo "OK"
+
+step 8 "/ai/consult"
 curl -sS --max-time 6 -H 'Content-Type: application/json' \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":10,\"question\":\"smoke\"}" \
   "$BASE/ai/consult" | jq -e . >/dev/null
