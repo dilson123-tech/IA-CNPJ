@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -52,6 +53,7 @@ def uncategorized(
     start: str | None = None,
     end: str | None = None,
     limit: int = Query(50, ge=1, le=200),
+    include_no_match: bool = Query(False),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
@@ -97,6 +99,179 @@ def uncategorized(
         )
     return out
 
+
+# -----------------------------
+# Data Quality: sugestões de categoria (rule-based)
+# -----------------------------
+
+def _normalize_text(s: str) -> str:
+    return (s or "").strip().lower()
+
+def _rules() -> list[dict[str, Any]]:
+    # Ordem importa: primeira regra que casar vence (confidence pode variar)
+    return [
+        {"rule": "pix|qr|transfer", "keywords": ["pix", "qr", "transfer"], "category_name": "Vendas", "confidence": 0.70},
+        {"rule": "venda|cliente|pedido", "keywords": ["venda", "cliente", "pedido"], "category_name": "Vendas", "confidence": 0.80},
+        {"rule": "frete|entrega|transport", "keywords": ["frete", "entrega", "transport"], "category_name": "Fretes", "confidence": 0.75},
+        {"rule": "aluguel|locacao", "keywords": ["aluguel", "locacao", "locação"], "category_name": "Aluguel", "confidence": 0.85},
+        {"rule": "luz|energia|celesc", "keywords": ["luz", "energia", "celesc"], "category_name": "Energia", "confidence": 0.85},
+        {"rule": "agua|água|samae", "keywords": ["agua", "água", "samae"], "category_name": "Água", "confidence": 0.85},
+        {"rule": "internet|wifi|provedor", "keywords": ["internet", "wifi", "provedor"], "category_name": "Internet", "confidence": 0.80},
+        {"rule": "mercado|super|padaria", "keywords": ["mercado", "super", "padaria"], "category_name": "Compras", "confidence": 0.75},
+        {"rule": "combustivel|gasolina|posto", "keywords": ["combustivel", "combustível", "gasolina", "posto"], "category_name": "Combustível", "confidence": 0.80},
+        {"rule": "salario|folha|pagamento", "keywords": ["salario", "salário", "folha", "pagamento"], "category_name": "Salários", "confidence": 0.80},
+        {"rule": "imposto|taxa|das|simples", "keywords": ["imposto", "taxa", "das", "simples"], "category_name": "Impostos", "confidence": 0.80},
+    ]
+
+def _ensure_categories_by_name(db: Session, company_id: int, names: list[str]) -> dict[str, int]:
+    # cria categorias que não existirem, e retorna mapa name->id
+    existing = list(db.scalars(select(Category)))
+    mp = {c.name: c.id for c in existing}
+    changed = False
+    for name in names:
+        if name not in mp:
+            c = Category(name=name)
+            db.add(c)
+            db.flush()
+            mp[name] = c.id
+            changed = True
+    if changed:
+        db.commit()
+    return mp
+
+@router.get("/suggest-categories")
+def suggest_categories(
+    company_id: int = Query(..., ge=1),
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """
+    Sugere categoria para transações sem categoria (rule-based).
+    Retorna lista: {id, suggested_category_id, confidence, rule, description}
+    """
+    rep._ensure_company(db, company_id)
+    start_dt, end_dt, _period = rep._resolve_period(start, end)
+
+    # pega uncategorized bruto (igual ao endpoint /uncategorized)
+    q = (
+        select(
+            Transaction.id,
+            Transaction.description,
+            Transaction.amount_cents,
+            Transaction.kind,
+            Transaction.occurred_at,
+        )
+        .where(Transaction.company_id == company_id)
+        .where(Transaction.occurred_at >= start_dt)
+        .where(Transaction.occurred_at <= end_dt)
+        .where(Transaction.category_id.is_(None))
+        .order_by(Transaction.occurred_at.desc(), Transaction.id.desc())
+        .limit(limit)
+    )
+    rows = db.execute(q).all()
+
+    rules = _rules()
+    needed_names = sorted({r["category_name"] for r in rules})
+    cat_map = _ensure_categories_by_name(db, company_id, needed_names)
+
+    out = []
+    for r in rows:
+        desc = _normalize_text(r.description or "")
+        suggested = None
+        for rule in rules:
+            if any(k in desc for k in rule["keywords"]):
+                suggested = rule
+                break
+        if suggested:
+            out.append({
+                "id": r.id,
+                "suggested_category_id": cat_map.get(suggested["category_name"]),
+                "confidence": suggested["confidence"],
+                "rule": suggested["rule"],
+                "description": r.description or "",
+            })
+        elif include_no_match:
+            out.append({
+                "id": r.id,
+                "suggested_category_id": None,
+                "confidence": 0.0,
+                "rule": "no_match",
+                "description": r.description or "",
+            })
+    return out
+
+
+
+
+@router.post("/apply-suggestions")
+def apply_suggestions(
+    company_id: int = Query(..., ge=1),
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = Query(200, ge=1, le=500),
+    dry_run: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """
+    Aplica sugestões de categoria (rule-based) para transações sem categoria no período.
+    - dry_run=true: não altera nada, só retorna o que faria.
+    """
+    rep._ensure_company(db, company_id)
+    start_dt, end_dt, _period = rep._resolve_period(start, end)
+
+    suggestions = suggest_categories(
+        company_id=company_id,
+        start=start,
+        end=end,
+        limit=limit,
+        db=db,
+    )
+
+    suggested_count = sum(1 for s in suggestions if s.get('suggested_category_id'))
+
+    if dry_run:
+        return {
+            "company_id": company_id,
+            "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
+            "dry_run": True,
+            "suggested": suggested_count,
+            "updated": 0,
+            "items": suggestions,
+        }
+
+    items = [
+        {"id": s["id"], "category_id": s["suggested_category_id"]}
+        for s in suggestions
+        if s.get("suggested_category_id")
+    ]
+
+    if not items:
+        return {
+            "company_id": company_id,
+            "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
+            "dry_run": False,
+            "suggested": suggested_count,
+            "updated": 0,
+            "missing_ids": [],
+            "skipped_ids": [],
+            "invalid_category_ids": [],
+        }
+
+    req = BulkCategorizeRequest(company_id=company_id, items=items)
+    res = bulk_categorize(req, db=db)
+
+    # compat pydantic v1/v2
+    payload = res.model_dump() if hasattr(res, "model_dump") else dict(res)
+
+    return {
+        "company_id": company_id,
+        "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
+        "dry_run": False,
+        "suggested": suggested_count,
+        **payload,
+    }
 
 @router.patch("/{tx_id}/category", response_model=TransactionOut)
 def set_transaction_category(
