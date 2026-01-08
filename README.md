@@ -16,6 +16,9 @@ Este repositório é separado do Aurea Gold para manter estabilidade, compliance
 
 ## Data Quality (categorias)
 
+> **Dica:** por padrão, o endpoint **não retorna** itens com `rule=no_match`.
+> Para listar também os sem match (debug/triagem), use `include_no_match=true`.
+
 ### Listar transações sem categoria
 ```bash
 curl -sS "http://127.0.0.1:8100/transactions/uncategorized?company_id=1&start=2026-01-01&end=2026-01-31&limit=50" | jq
