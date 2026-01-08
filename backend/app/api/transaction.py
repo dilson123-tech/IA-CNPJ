@@ -145,6 +145,7 @@ def suggest_categories(
     start: str | None = None,
     end: str | None = None,
     limit: int = Query(100, ge=1, le=500),
+    include_no_match: bool = Query(False),
     db: Session = Depends(get_db),
 ):
     """
@@ -200,6 +201,9 @@ def suggest_categories(
                 "rule": "no_match",
                 "description": r.description or "",
             })
+    # por padrão, NÃO devolve no_match (só sugestões aplicáveis)
+    if not include_no_match:
+        out = [x for x in out if x.get("suggested_category_id") is not None]
     return out
 
 
