@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import httpx
+
 from dataclasses import dataclass
 from typing import Protocol, Sequence, Optional, List, Dict, Any
 
@@ -54,6 +56,14 @@ class AISuggestCategoriesProvider(Protocol):
 # Default provider: NULL (no-op)
 # -----------------------------
 
+
+def _load_prompt(name: str) -> str:
+    base = Path(__file__).parent / "prompts" / name
+    try:
+        return base.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
 class NullSuggestProvider:
     """
     Provider padrão (safe): não chama nada externo.
@@ -72,6 +82,104 @@ class NullSuggestProvider:
                 for i in items
             ]
         return []
+
+class OpenAISuggestProvider:
+    """Provider OpenAI (D12).
+    Guardrails:
+    - Se faltar config/erro/timeout: retorna None => caller cai no rule-based.
+    - Nunca loga chave/prompt completo.
+    """
+
+    def __init__(self):
+        pass
+
+    def suggest_categories(self, req, include_no_match: bool = False):
+        # carrega config (settings ou env fallback já existe em get_ai_config)
+        try:
+            import importlib
+            mod = importlib.import_module("app.core.settings")
+            s = getattr(mod, "settings", None) or (mod.get_settings() if hasattr(mod, "get_settings") else None) or mod.Settings()
+            api_key = (getattr(s, "OPENAI_API_KEY", "") or "").strip()
+            model = (getattr(s, "OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini").strip()
+            base_url = (getattr(s, "OPENAI_BASE_URL", "https://api.openai.com/v1") or "https://api.openai.com/v1").strip().rstrip("/")
+            timeout_s = int(getattr(s, "OPENAI_TIMEOUT_S", 25) or 25)
+        except Exception:
+            return None
+
+        if not api_key:
+            return None
+
+        # monta payload com o mínimo necessário (auditável)
+        prompt = _load_prompt("suggest_categories_v1.md")
+        if not prompt:
+            return None
+
+        # tenta extrair campos comuns do request pydantic
+        try:
+            payload = req.model_dump() if hasattr(req, "model_dump") else dict(req)
+        except Exception:
+            payload = {}
+
+        # chama /responses (mais novo). Se não existir, cai pra /chat/completions.
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        # instrução: retornar JSON puro
+        user_input = json.dumps(payload, ensure_ascii=False)
+
+        try:
+            with httpx.Client(timeout=timeout_s) as client:
+                url = f"{base_url}/responses"
+                body = {
+                    "model": model,
+                    "input": [
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user_input},
+                    ],
+                    "text": {"format": {"type": "json_object"}},
+                }
+                r = client.post(url, headers=headers, json=body)
+                if r.status_code >= 400:
+                    # fallback para chat.completions
+                    url2 = f"{base_url}/chat/completions"
+                    body2 = {
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": user_input},
+                        ],
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0,
+                    }
+                    r2 = client.post(url2, headers=headers, json=body2)
+                    if r2.status_code >= 400:
+                        return None
+                    data = r2.json()
+                    txt = data["choices"][0]["message"]["content"]
+                else:
+                    data = r.json()
+                    # responses: pega texto agregado
+                    # melhor esforço: output_text ou content
+                    txt = data.get("output_text")
+                    if not txt:
+                        # tenta varrer output
+                        out = data.get("output", [])
+                        txt = ""
+                        for item in out:
+                            for c in item.get("content", []):
+                                if c.get("type") in ("output_text", "text"):
+                                    txt += c.get("text", "")
+                        txt = txt.strip()
+
+                if not txt:
+                    return None
+
+                parsed = json.loads(txt)
+                return parsed
+        except Exception:
+            return None
 
 
 def get_provider(name: str | None) -> AISuggestCategoriesProvider:
