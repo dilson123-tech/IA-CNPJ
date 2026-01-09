@@ -8,9 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.schemas.ai import AISuggestCategoriesRequest, AISuggestCategoriesResponse, AISuggestedItem
+from app.schemas.ai import AIApplySuggestionsRequest, AIApplySuggestionsResponse
 from app.schemas.ai import AiConsultRequest, AiConsultResponse
 from app.schemas.reports import Period, Totals, CategoryBreakdown, TransactionBrief
 from app.api import reports as rep
+from app.api.transaction import suggest_categories
+from app.api.transaction import apply_suggestions as tx_apply_suggestions
 
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -126,3 +130,88 @@ def consult(payload: AiConsultRequest, db: Session = Depends(get_db)):
             detail['trace'] = traceback.format_exc(limit=6)
 
         raise HTTPException(status_code=500, detail=detail)
+
+@router.post("/suggest-categories", response_model=AISuggestCategoriesResponse)
+def ai_suggest_categories(payload: AISuggestCategoriesRequest, db: Session = Depends(get_db)):
+    """
+    Fase D06: endpoint AI (stub) que reaproveita o rule-based do /transactions/suggest-categories.
+    Depois trocamos por LLM sem quebrar contrato.
+    """
+    items = suggest_categories(
+        company_id=payload.company_id,
+        start=payload.start,
+        end=payload.end,
+        limit=payload.limit,
+        include_no_match=payload.include_no_match,
+        db=db,
+    )
+
+    # resposta no contrato do schema AI
+    return {
+        "company_id": payload.company_id,
+        "period": {"start": payload.start, "end": payload.end},
+        "items": items,
+    }
+
+@router.post("/apply-suggestions", response_model=AIApplySuggestionsResponse)
+def ai_apply_suggestions(payload: AIApplySuggestionsRequest, db: Session = Depends(get_db)):
+    # Facade IA: reaproveita Data Quality do /transactions.
+    # include_no_match só faz sentido no dry_run (debug/triagem), pq no apply não tem o que aplicar em no_match.
+    try:
+        rep._ensure_company(db, payload.company_id)
+        start_dt, end_dt, _period = rep._resolve_period(payload.start, payload.end)
+
+        if payload.dry_run and payload.include_no_match:
+            items = suggest_categories(
+                company_id=payload.company_id,
+                start=payload.start,
+                end=payload.end,
+                limit=payload.limit,
+                include_no_match=True,
+                db=db,
+            )
+            suggested = sum(1 for s in items if s.get("suggested_category_id"))
+            data = {
+                "company_id": payload.company_id,
+                "period": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
+                "dry_run": True,
+                "suggested": suggested,
+                "updated": 0,
+                "items": items,
+                "missing_ids": [],
+                "skipped_ids": [],
+                "invalid_category_ids": [],
+            }
+        else:
+            # apply real (ou dry_run normal) – NÃO repassa include_no_match
+            data = tx_apply_suggestions(
+                company_id=payload.company_id,
+                start=payload.start,
+                end=payload.end,
+                limit=payload.limit,
+                dry_run=payload.dry_run,
+                db=db,
+            )
+            if isinstance(data, dict):
+                data.setdefault("items", [])
+
+        # valida no schema (pydantic v2/v1 compat)
+        if hasattr(AIApplySuggestionsResponse, "model_validate"):
+            return AIApplySuggestionsResponse.model_validate(data)
+        if hasattr(AIApplySuggestionsResponse, "parse_obj"):
+            return AIApplySuggestionsResponse.parse_obj(data)
+        return AIApplySuggestionsResponse(**data)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        env = os.getenv("ENV", "lab")
+        detail = {
+            "error_code": "AI_APPLY_SUGGESTIONS_FAILED",
+            "message": str(e),
+            "hint": "Veja /tmp/ia-cnpj-uvicorn.log e compare com /transactions/apply-suggestions (mesmo período).",
+        }
+        if env == "lab":
+            detail["trace"] = traceback.format_exc(limit=8)
+        raise HTTPException(status_code=500, detail=detail)
+
