@@ -135,25 +135,75 @@ def consult(payload: AiConsultRequest, db: Session = Depends(get_db)):
 @router.post("/suggest-categories", response_model=AISuggestCategoriesResponse)
 def ai_suggest_categories(payload: AISuggestCategoriesRequest, db: Session = Depends(get_db)):
     """
-    Fase D06: endpoint AI (stub) que reaproveita o rule-based do /transactions/suggest-categories.
-    Depois trocamos por LLM sem quebrar contrato.
+    Facade AI: contrato estável + fallback determinístico.
+    Compat: aceita start/end OU start_date/end_date.
+    Sempre retorna: {company_id, period:{start,end}, items:[...]}.
     """
-    _ai_res = provider_suggest_categories(payload, include_no_match=getattr(payload, "include_no_match", False))
+    start = getattr(payload, "start", None) or getattr(payload, "start_date", None)
+    end = getattr(payload, "end", None) or getattr(payload, "end_date", None)
+    if not start or not end:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "INVALID_PERIOD",
+                "message": "Informe start/end ou start_date/end_date (ISO yyyy-mm-dd).",
+            },
+        )
+
+    include_no_match = bool(getattr(payload, "include_no_match", False))
+    limit = getattr(payload, "limit", 200)
+
+    # tenta normalizar pro provider (caso ele leia payload.start/payload.end)
+    try:
+        setattr(payload, "start", start)
+        setattr(payload, "end", end)
+    except Exception:
+        pass
+
+    _ai_res = None
+    try:
+        _ai_res = provider_suggest_categories(payload, include_no_match=include_no_match)
+    except Exception:
+        _ai_res = None
+
     if _ai_res is not None:
-        return _ai_res
+        # normaliza qualquer retorno do provider pra dict no schema
+        if hasattr(_ai_res, "model_dump"):
+            data = _ai_res.model_dump()
+        elif hasattr(_ai_res, "dict"):
+            data = _ai_res.dict()
+        elif isinstance(_ai_res, list):
+            data = {"items": _ai_res}
+        elif isinstance(_ai_res, dict):
+            data = _ai_res
+        else:
+            data = {}
+
+        data.setdefault("company_id", payload.company_id)
+
+        per = data.get("period") or {}
+        if not isinstance(per, dict):
+            per = {}
+        per["start"] = per.get("start") or start
+        per["end"] = per.get("end") or end
+        data["period"] = per
+
+        data.setdefault("items", [])
+        return data
+
+    # fallback determinístico
     items = suggest_categories(
         company_id=payload.company_id,
-        start=payload.start,
-        end=payload.end,
-        limit=payload.limit,
-        include_no_match=payload.include_no_match,
+        start=start,
+        end=end,
+        limit=limit,
+        include_no_match=include_no_match,
         db=db,
     )
 
-    # resposta no contrato do schema AI
     return {
         "company_id": payload.company_id,
-        "period": {"start": payload.start, "end": payload.end},
+        "period": {"start": start, "end": end},
         "items": items,
     }
 
