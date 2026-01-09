@@ -9,3 +9,6 @@ dist/
 
 # local patch backups
 *.bak_*
+# allow committed example env
+!.env.example
+
