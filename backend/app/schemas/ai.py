@@ -1,7 +1,7 @@
 from typing import Optional, List
 
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices, ConfigDict
 
 from app.schemas.reports import Period, Totals, CategoryBreakdown, TransactionBrief
 
@@ -34,13 +34,16 @@ class AIPeriod(BaseModel):
 
 
 class AISuggestCategoriesRequest(BaseModel):
-    company_id: int = Field(..., ge=1)
-    start: Optional[str] = Field(None, description="YYYY-MM-DD")
-    end: Optional[str] = Field(None, description="YYYY-MM-DD")
-    limit: int = Field(50, ge=1, le=500)
+    """
+    Compat: aceita start/end e também start_date/end_date (front).
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    company_id: int
+    start: str = Field(validation_alias=AliasChoices("start", "start_date"))
+    end: str = Field(validation_alias=AliasChoices("end", "end_date"))
+    limit: int = 200
     include_no_match: bool = False
-
-
 class AISuggestedItem(BaseModel):
     id: int
     suggested_category_id: Optional[int] = None
