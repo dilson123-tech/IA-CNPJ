@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.ai.provider import provider_suggest_categories
 import os
 import traceback
 
@@ -137,6 +138,9 @@ def ai_suggest_categories(payload: AISuggestCategoriesRequest, db: Session = Dep
     Fase D06: endpoint AI (stub) que reaproveita o rule-based do /transactions/suggest-categories.
     Depois trocamos por LLM sem quebrar contrato.
     """
+    _ai_res = provider_suggest_categories(payload, include_no_match=getattr(payload, "include_no_match", False))
+    if _ai_res is not None:
+        return _ai_res
     items = suggest_categories(
         company_id=payload.company_id,
         start=payload.start,

@@ -3,6 +3,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+
+    # IA (Facade / Providers)
+    AI_ENABLED: bool = False
+    AI_PROVIDER: str = "null"
     APP_NAME: str = "IA-CNPJ API"
     ENV: str = "lab"  # lab|prod
     DATABASE_URL: str = "sqlite:///./lab.db"

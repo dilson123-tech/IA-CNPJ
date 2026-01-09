@@ -6,3 +6,6 @@ dist/
 .env
 .env.*
 .DS_Store
+
+# local patch backups
+*.bak_*

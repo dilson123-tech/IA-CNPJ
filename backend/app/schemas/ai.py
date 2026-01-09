@@ -1,4 +1,4 @@
-from __future__ import annotations
+from typing import Optional, List
 
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -27,3 +27,54 @@ class AiConsultResponse(BaseModel):
     numbers: Totals
     top_categories: list[CategoryBreakdown]
     recent_transactions: list[TransactionBrief]
+
+class AIPeriod(BaseModel):
+    start: str = Field(..., description="YYYY-MM-DD")
+    end: str = Field(..., description="YYYY-MM-DD")
+
+
+class AISuggestCategoriesRequest(BaseModel):
+    company_id: int = Field(..., ge=1)
+    start: Optional[str] = Field(None, description="YYYY-MM-DD")
+    end: Optional[str] = Field(None, description="YYYY-MM-DD")
+    limit: int = Field(50, ge=1, le=500)
+    include_no_match: bool = False
+
+
+class AISuggestedItem(BaseModel):
+    id: int
+    suggested_category_id: Optional[int] = None
+    confidence: float = 0.0
+    rule: str = "no_match"
+    description: str = ""
+
+
+class AISuggestCategoriesResponse(BaseModel):
+    company_id: int
+    period: AIPeriod
+    items: List[AISuggestedItem] = []
+
+# -----------------------------
+# D07: AI facade - apply suggestions (determinístico por enquanto)
+# -----------------------------
+
+from pydantic import BaseModel, Field
+
+class AIApplySuggestionsRequest(BaseModel):
+    company_id: int = Field(..., ge=1)
+    start: str | None = None
+    end: str | None = None
+    limit: int = Field(200, ge=1, le=500)
+    dry_run: bool = False
+    include_no_match: bool = False
+
+class AIApplySuggestionsResponse(BaseModel):
+    company_id: int
+    period: dict
+    dry_run: bool
+    suggested: int
+    updated: int
+    items: list[AISuggestedItem] = []
+    missing_ids: list[int] = []
+    skipped_ids: list[int] = []
+    invalid_category_ids: list[int] = []
