@@ -5,3 +5,4 @@
 # local sqlite (do not commit)
 lab.db
 *.db
+CAMINHO_DO_DB_AQUI
