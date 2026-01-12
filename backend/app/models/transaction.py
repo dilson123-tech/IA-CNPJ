@@ -1,6 +1,7 @@
-from sqlalchemy import String, Integer, ForeignKey
+from sqlalchemy import String, Integer, ForeignKey, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
+from datetime import datetime
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -15,5 +16,8 @@ class Transaction(Base):
 
     # valor em centavos (evita float)
     amount_cents: Mapped[int] = mapped_column(Integer)
+
+    # data/hora do lançamento (base para relatórios)
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     description: Mapped[str] = mapped_column(String(200), default="")

@@ -13,3 +13,15 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 class Base(DeclarativeBase):
     pass
+
+
+
+from sqlalchemy.orm import Session
+
+# dependency padrão FastAPI
+def get_db() -> "Session":
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
