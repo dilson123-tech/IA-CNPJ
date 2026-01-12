@@ -12,3 +12,4 @@ dist/
 # allow committed example env
 !.env.example
 
+.bak*
