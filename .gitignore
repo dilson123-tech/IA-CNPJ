@@ -13,3 +13,7 @@ dist/
 !.env.example
 
 .bak*
+
+# backups locais
+*.bak
+*.bak_*
