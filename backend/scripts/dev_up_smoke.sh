@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# --- DB consistente (CI-safe): caminho absoluto p/ SQLite ---
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DB_PATH="${DB_PATH:-$ROOT/backend/lab.db}"
+export DATABASE_URL="${DATABASE_URL:-sqlite:///${DB_PATH}}"
+echo "[db] DATABASE_URL=$DATABASE_URL"
+
 
 # raiz do repo (../.. a partir de backend/scripts)
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -7,8 +13,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # DB consistente (evita alembic migrar um sqlite e a API subir em outro)
 DB_PATH="${DB_PATH:-$ROOT/backend/app.db}"
-export DATABASE_URL="${DATABASE_URL:-sqlite:///$DB_PATH}"
-echo "[db] DATABASE_URL=$DATABASE_URL"
 
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
