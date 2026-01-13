@@ -111,6 +111,22 @@ SMOKE_TAG="__SMOKE_AI__$(date +%Y%m%d_%H%M%S)"
 echo "API=$API COMPANY_ID=$COMPANY_ID PERIOD=$START..$END"
 
 echo
+
+echo
+echo "[0/5] garante company_id=$COMPANY_ID (seed idempotente)"
+# tenta GET /companies/{id}; se 404/erro, cria uma empresa mínima
+if ! curl -sS --max-time 5 "$API/companies/$COMPANY_ID" | jq -e '.id' >/dev/null 2>&1; then
+  # cria uma empresa "SMOKE" e pega o id retornado
+  CNPJ_SMOKE="00000000000191"
+  COMP_PAYLOAD="$(jq -nc --arg cnpj "$CNPJ_SMOKE" --arg rs "Empresa Smoke" '{cnpj:$cnpj, razao_social:$rs}')"
+  created="$(curl_json POST "$API/companies" "$COMP_PAYLOAD")" || die "falhou criar empresa smoke"
+  new_id="$(echo "$created" | jq -r '.id')"
+  [[ "$new_id" =~ ^[0-9]+$ ]] || die "id inválido ao criar empresa: $new_id"
+  echo "OK: criada empresa smoke id=$new_id (atualizando COMPANY_ID)"
+  COMPANY_ID="$new_id"
+else
+  echo "OK: company_id=$COMPANY_ID existe"
+fi
 echo "[1/5] health"
 curl -sS --max-time 5 "$API/health" | jq . >/dev/null
 echo "OK"
@@ -124,9 +140,14 @@ PAYLOAD="$(jq -n --argjson company_id "$COMPANY_ID" \
                 --arg description "$DESC" \
   '{company_id:$company_id, occurred_at:$occurred_at, kind:$kind, amount_cents:$amount_cents, description:$description}')"
 
-TX_CREATE="$(curl -sS --max-time 10 -X POST "$API/transactions" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD")"
+TX_CREATE="$(curl_json POST "$API/transactions" "$PAYLOAD")" || exit $?
+
+# se o backend respondeu erro (JSON sem .id), mostra e morre bonito
+if ! echo "$TX_CREATE" | jq -e 'has("id")' >/dev/null 2>&1; then
+  echo "❌ /transactions falhou. Resposta:" >&2
+  echo "$TX_CREATE" | jq . >&2 || echo "$TX_CREATE" >&2
+  exit 2
+fi
 
 TX_ID="$(jq -r '.id' <<<"$TX_CREATE")"
 TX_CAT="$(jq -r '.category_id' <<<"$TX_CREATE")"
@@ -210,4 +231,3 @@ if [[ "$TX_CAT" != "$SUG_CAT" ]]; then
 fi
 
 echo "✅ SMOKE PASS (TX_ID=$TX_ID category_id=$TX_CAT)"
-
