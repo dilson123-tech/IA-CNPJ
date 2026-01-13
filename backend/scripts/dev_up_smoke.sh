@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# raiz do repo (../.. a partir de backend/scripts)
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+
+# DB consistente (evita alembic migrar um sqlite e a API subir em outro)
+DB_PATH="${DB_PATH:-$ROOT/backend/app.db}"
+export DATABASE_URL="${DATABASE_URL:-sqlite:///$DB_PATH}"
+echo "[db] DATABASE_URL=$DATABASE_URL"
+
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BACKEND="$ROOT/backend"
 VENV_ACT="$BACKEND/.venv/bin/activate"
