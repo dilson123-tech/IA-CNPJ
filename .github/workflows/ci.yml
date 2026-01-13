@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   smoke:
-    name: Smoke (dev_up_smoke)
+    name: Smoke (make dev)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -32,41 +32,18 @@ jobs:
       - name: Install OS deps
         run: sudo apt-get update && sudo apt-get install -y jq make
 
-      - name: Setup venv + deps
-        run: |
-          set -euo pipefail
-          cd backend
-          python -m venv .venv
-          source .venv/bin/activate
-          python -m pip install --upgrade pip
-
-          REQ=""
-          if [ -f requirements.txt ]; then REQ="requirements.txt"; fi
-          if [ -z "$REQ" ] && [ -f ../requirements.txt ]; then REQ="../requirements.txt"; fi
-          if [ -z "$REQ" ]; then
-            REQ="$(find .. -maxdepth 4 -type f -iname 'requirements*.txt' | sort | head -n1 || true)"
-          fi
-
-          if [ -z "$REQ" ]; then
-            echo "❌ Nenhum requirements*.txt encontrado. Dump tree (maxdepth 3):"
-            find .. -maxdepth 3 -type f | sort | sed -n '1,200p'
-            exit 1
-          fi
-
-          echo "✅ Using requirements: $REQ"
-          pip install -r "$REQ"
-
-      - name: Run smoke via make dev (random port)
+      - name: Run make dev (random port)
         env:
           AI_ENABLED: "false"
+          DATABASE_URL: "sqlite:///./app.db"
         run: |
           set -euo pipefail
           chmod +x backend/scripts/dev_up_smoke.sh backend/scripts/smoke_ai_apply.sh || true
 
           PORT="$(python - <<'PY'
 import socket
-s = socket.socket()
-s.bind(("127.0.0.1", 0))
+s=socket.socket()
+s.bind(("127.0.0.1",0))
 print(s.getsockname()[1])
 s.close()
 PY
