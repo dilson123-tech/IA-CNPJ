@@ -32,6 +32,14 @@ jobs:
       - name: Install OS deps
         run: sudo apt-get update && sudo apt-get install -y jq make
 
+      - name: Bootstrap venv + deps
+        run: |
+          set -euo pipefail
+          python -m venv backend/.venv
+          source backend/.venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
       - name: Run make dev (random port)
         env:
           AI_ENABLED: "false"
@@ -39,31 +47,23 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x backend/scripts/dev_up_smoke.sh backend/scripts/smoke_ai_apply.sh || true
-
-          PORT="$(python - <<'PY'
-import socket
-s=socket.socket()
-s.bind(("127.0.0.1",0))
-print(s.getsockname()[1])
-s.close()
-PY
-)"
+          PORT="$(python -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
           echo "Using PORT=$PORT"
           PORT="$PORT" HOST=127.0.0.1 BIND_HOST=127.0.0.1 make dev
 
       - name: Show uvicorn logs (on failure)
-        if: failure()
+        if: ${{ failure() }}
         run: |
           set +e
           echo "== uvicorn logs =="
-          ls -la /tmp/ia-cnpj_uvicorn_*.log 2>/dev/null || echo "(sem logs em /tmp)"
+          ls -la /tmp/ia-cnpj_uvicorn_*.log 2>/dev/null || echo "(sem logs)"
           for f in /tmp/ia-cnpj_uvicorn_*.log; do
             echo "----- $f -----"
             tail -n 200 "$f" || true
           done
 
       - name: Upload uvicorn logs (on failure)
-        if: failure()
+        if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
           name: uvicorn-logs
