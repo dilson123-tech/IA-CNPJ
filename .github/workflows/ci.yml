@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Smoke (dev_up_smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OS deps
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Setup venv + deps
+        run: |
+          set -euo pipefail
+          cd backend
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          elif [ -f ../requirements.txt ]; then
+            pip install -r ../requirements.txt
+          else
+            echo "❌ requirements.txt não encontrado" >&2
+            exit 1
+          fi
+
+      - name: Run smoke via make dev (random port)
+        env:
+          AI_ENABLED: "false"
+        run: |
+          set -euo pipefail
+          chmod +x backend/scripts/dev_up_smoke.sh backend/scripts/smoke_ai_apply.sh || true
+
+          PORT="$(python - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+          echo "Using PORT=$PORT"
+          PORT="$PORT" HOST=127.0.0.1 BIND_HOST=127.0.0.1 make dev
+
+      - name: Upload uvicorn logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvicorn-logs
+          path: /tmp/ia-cnpj_uvicorn_*.log
+          if-no-files-found: ignore
