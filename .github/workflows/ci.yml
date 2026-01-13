@@ -5,6 +5,10 @@ on:
     branches: ["main"]
   push:
     branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -26,7 +30,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install OS deps
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq make
 
       - name: Setup venv + deps
         run: |
@@ -35,14 +39,22 @@ jobs:
           python -m venv .venv
           source .venv/bin/activate
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          elif [ -f ../requirements.txt ]; then
-            pip install -r ../requirements.txt
-          else
-            echo "❌ requirements.txt não encontrado" >&2
+
+          REQ=""
+          if [ -f requirements.txt ]; then REQ="requirements.txt"; fi
+          if [ -z "$REQ" ] && [ -f ../requirements.txt ]; then REQ="../requirements.txt"; fi
+          if [ -z "$REQ" ]; then
+            REQ="$(find .. -maxdepth 4 -type f -iname 'requirements*.txt' | sort | head -n1 || true)"
+          fi
+
+          if [ -z "$REQ" ]; then
+            echo "❌ Nenhum requirements*.txt encontrado. Dump tree (maxdepth 3):"
+            find .. -maxdepth 3 -type f | sort | sed -n '1,200p'
             exit 1
           fi
+
+          echo "✅ Using requirements: $REQ"
+          pip install -r "$REQ"
 
       - name: Run smoke via make dev (random port)
         env:
@@ -61,6 +73,17 @@ PY
 )"
           echo "Using PORT=$PORT"
           PORT="$PORT" HOST=127.0.0.1 BIND_HOST=127.0.0.1 make dev
+
+      - name: Show uvicorn logs (on failure)
+        if: failure()
+        run: |
+          set +e
+          echo "== uvicorn logs =="
+          ls -la /tmp/ia-cnpj_uvicorn_*.log 2>/dev/null || echo "(sem logs em /tmp)"
+          for f in /tmp/ia-cnpj_uvicorn_*.log; do
+            echo "----- $f -----"
+            tail -n 200 "$f" || true
+          done
 
       - name: Upload uvicorn logs (on failure)
         if: failure()
