@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# --- DB consistente (CI-safe): caminho absoluto p/ SQLite ---
+# --- DB consistente (CI-safe): normaliza sqlite relativo -> absoluto ---
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DB_PATH="${DB_PATH:-$ROOT/backend/lab.db}"
-export DATABASE_URL="${DATABASE_URL:-sqlite:///${DB_PATH}}"
+
+# Se vier um sqlite RELATIVO (ex: sqlite:///./app.db), força pra absoluto (sqlite:////abs/path.db)
+if [[ "${DATABASE_URL:-}" == sqlite:///./* || "${DATABASE_URL:-}" == sqlite:///* && "${DATABASE_URL:-}" != sqlite:////* ]]; then
+  export DATABASE_URL="sqlite:///${DB_PATH}"
+elif [[ -z "${DATABASE_URL:-}" ]]; then
+  export DATABASE_URL="sqlite:///${DB_PATH}"
+fi
+
 echo "[db] DATABASE_URL=$DATABASE_URL"
 
 
