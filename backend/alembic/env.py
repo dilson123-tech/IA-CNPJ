@@ -1,9 +1,11 @@
+from pathlib import Path
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
+from app.core.settings import settings
 from app.db import Base
 from app.models.company import Company  # noqa: F401
 from app.models.transaction import Transaction  # noqa: F401
@@ -12,6 +14,27 @@ from app.models.category import Category  # noqa: F401
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# --- IA-CNPJ: garante Alembic usando o MESMO DATABASE_URL do app (CI-safe) ---
+def _normalize_sqlite_url(url: str) -> str:
+    if not url.startswith("sqlite"):
+        return url
+    # sqlite:///./foo.db -> absoluto baseado em backend/
+    if url.startswith("sqlite:///./"):
+        rel = url[len("sqlite:///./"):]
+        base = Path(__file__).resolve().parents[1]  # backend/
+        abs_path = (base / rel).resolve()
+        return "sqlite:////" + abs_path.as_posix().lstrip("/")
+    # sqlite:///abs/path.db -> garante 4 slashes
+    if url.startswith("sqlite:///") and not url.startswith("sqlite:////"):
+        path = url[len("sqlite:///"):]
+        if path.startswith("/"):
+            return "sqlite:////" + path.lstrip("/")
+    return url
+
+config.set_main_option("sqlalchemy.url", _normalize_sqlite_url(settings.DATABASE_URL))
+# --- end ---
+
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
