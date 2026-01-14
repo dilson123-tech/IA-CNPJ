@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case, select, desc
+from sqlalchemy import func, case, select
 
 from app.db import get_db
 from app.models.transaction import Transaction
