@@ -10,7 +10,7 @@ from app.db import get_db
 from app.models.transaction import Transaction
 from app.models.company import Company
 from app.models.category import Category
-from app.schemas.reports import CategoryBreakdown, ContextResponse, DailyResponse, Period, SummaryResponse, TopCategoriesResponse, Totals, TransactionBrief
+from app.schemas.reports import CategoryBreakdown, ContextResponse, DailyResponse, Period, SummaryResponse, TopCategoriesResponse, Totals, TransactionBrief, DailyPoint
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
