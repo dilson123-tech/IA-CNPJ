@@ -1,6 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+
+
+# --- CI: dump do uvicorn log em qualquer erro ---
+dump_uvicorn_log_on_err() {
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    local port="${PORT:-8100}"
+    local log="/tmp/ia-cnpj_uvicorn_${port}.log"
+    if [ -f "$log" ]; then
+      echo ""
+      echo "---- tail $log (ultimas 220 linhas) ----"
+      tail -n 220 "$log" || true
+      echo "---- end ----"
+      echo ""
+    fi
+  fi
+}
+trap dump_uvicorn_log_on_err ERR
+# ----------------------------------------------
+# --- CI: DB sqlite unico (alembic + app) ---
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+  CI_DB="${IA_CNPJ_CI_DB:-$ROOT_DIR/backend/.ci_smoke.db}"
+  export DATABASE_URL="sqlite:///${CI_DB}"
+  rm -f "${CI_DB}"  # garante estado limpo/idempotente no CI
+fi
+# -----------------------------------------
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # --- CI bootstrap: cria venv se não existir (runner não vem com .venv) ---
