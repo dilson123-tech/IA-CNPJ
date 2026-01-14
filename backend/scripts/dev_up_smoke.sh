@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# --- CI/SMOKE: garante 1 SQLite absoluto (alembic + uvicorn) ---
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  BACKEND_DIR="${ROOT_DIR}/backend"
+  CI_DB_PATH="${BACKEND_DIR}/.ci/ci.sqlite"
+  mkdir -p "$(dirname "${CI_DB_PATH}")"
+  export DATABASE_URL="sqlite:///${CI_DB_PATH}"
+  echo "🗄️  CI DATABASE_URL=${DATABASE_URL}"
+fi
+# --- end CI/SMOKE ---
+
+
 
 
 # --- CI: dump do uvicorn log em qualquer erro ---
