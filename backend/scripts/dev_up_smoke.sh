@@ -34,7 +34,7 @@ trap dump_uvicorn_log_on_err ERR
 # --- CI: DB sqlite unico (alembic + app) ---
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
   ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-  CI_DB="${IA_CNPJ_CI_DB:-$ROOT_DIR/backend/.ci_smoke.db}"
+  CI_DB="${IA_CNPJ_CI_DB:-$ROOT_DIR/backend/.ci/ci.sqlite}"
   export DATABASE_URL="sqlite:///${CI_DB}"
   rm -f "${CI_DB}"  # garante estado limpo/idempotente no CI
 fi
