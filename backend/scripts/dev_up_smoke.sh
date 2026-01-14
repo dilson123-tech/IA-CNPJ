@@ -89,7 +89,8 @@ echo "[1/4] alembic upgrade head"
 alembic upgrade head
 
 LOG="/tmp/ia-cnpj_uvicorn_${PORT}.log"
-echo "[2/4] subindo uvicorn em ${BIND_HOST}:${PORT} (bg) | log: ${LOG}"
+env DATABASE_URL="${DATABASE_URL:-}" echo "[2/4] subindo uvicorn em ${BIND_HOST}:${PORT} (bg) | log: ${LOG}"
+echo "�� DATABASE_URL=${DATABASE_URL:-<empty>}"
 uvicorn "$UVICORN_APP" --host "$BIND_HOST" --port "$PORT" --log-level info >"$LOG" 2>&1 &
 UV_PID=$!
 
