@@ -2,6 +2,22 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# --- CI bootstrap: cria venv se não existir (runner não vem com .venv) ---
+VENV_ACT="$ROOT/backend/.venv/bin/activate"
+if [ ! -f "$VENV_ACT" ]; then
+  echo "⚙️  criando venv em $ROOT/backend/.venv (CI)"
+  python -m venv "$ROOT/backend/.venv"
+  # shellcheck disable=SC1090
+  source "$VENV_ACT"
+  python -m pip install -U pip
+  pip install -r "$ROOT/backend/requirements.txt" -r "$ROOT/backend/requirements-dev.txt"
+else
+  # shellcheck disable=SC1090
+  source "$VENV_ACT"
+fi
+# ---------------------------------------------------------------------------
+
 BACKEND="$ROOT/backend"
 VENV_ACT="$BACKEND/.venv/bin/activate"
 ALEMBIC_INI="$BACKEND/alembic.ini"
