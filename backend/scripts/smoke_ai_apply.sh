@@ -230,4 +230,47 @@ if [[ "$TX_CAT" != "$SUG_CAT" ]]; then
   exit 1
 fi
 
+
+echo
+echo "[6/6] idempotência: re-apply apply-suggestions dry_run=true deve ser 0"
+
+# bash strict (-u): garante variáveis definidas
+: "${PERIOD_FROM:=}"
+: "${PERIOD_TO:=}"
+
+# garante período (suporta PERIOD=YYYY-MM-DD..YYYY-MM-DD)
+if [[ -z "${PERIOD_FROM:-}" || -z "${PERIOD_TO:-}" ]]; then
+  if [[ -n "${PERIOD:-}" && "${PERIOD}" == *".."* ]]; then
+    PERIOD_FROM="${PERIOD%%..*}"
+    PERIOD_TO="${PERIOD##*..}"
+  fi
+fi
+
+# tenta reaproveitar corpo/url já usados no apply principal
+_IDEM_BODY="${apply_body:-${APPLY_BODY:-${SUG_BODY:-${SUGGEST_BODY:-}}}}"
+if [[ -z "${_IDEM_BODY}" ]]; then
+  _IDEM_BODY="$(jq -n --argjson company_id "${COMPANY_ID}" \
+    --arg period_from "${PERIOD_FROM}" --arg period_to "${PERIOD_TO}" \
+    '{company_id:$company_id, period_from:$period_from, period_to:$period_to}')"
+fi
+
+_BASE_APPLY_URL="${apply_url:-${APPLY_URL:-${API%/}/ai/suggest/apply}}"
+_IDEM_URL="${_BASE_APPLY_URL}?dry_run=true"
+
+_IDEM_RESP="$(curl -sS -X POST "${_IDEM_URL}" -H 'Content-Type: application/json' -d "${_IDEM_BODY}" || true)"
+_IDEM_SUG="$(echo "${_IDEM_RESP}" | jq -r 'try (.suggested // .count // (.items|length) // (.suggestions|length) // 0) catch "__BADJSON__"')"
+
+if [[ "${_IDEM_SUG}" == "__BADJSON__" ]]; then
+  echo "❌ idempotência: resposta não-JSON no re-apply"
+  echo "${_IDEM_RESP}" | head -c 600
+  exit 1
+fi
+
+if [[ "${_IDEM_SUG}" != "0" ]]; then
+  echo "❌ idempotência falhou: esperado suggested=0 no re-apply; veio suggested=${_IDEM_SUG}"
+  echo "${_IDEM_RESP}" | head -c 600
+  exit 1
+fi
+
+echo "OK (idempotência): suggested=0"
 echo "✅ SMOKE PASS (TX_ID=$TX_ID category_id=$TX_CAT)"
