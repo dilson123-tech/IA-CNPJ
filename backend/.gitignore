@@ -5,3 +5,12 @@
 # local sqlite (do not commit)
 lab.db
 *.db
+CAMINHO_DO_DB_AQUI
+.bak*
+# local sqlite db (do not commit)
+*.sqlite
+*.sqlite3
+app.db
+# env local (do not commit) — mas deixa o exemplo entrar
+.env
+!.env.example

@@ -9,10 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.schemas.ai import AISuggestCategoriesRequest, AISuggestCategoriesResponse, AISuggestedItem
+from app.schemas.ai import AISuggestCategoriesRequest, AISuggestCategoriesResponse
 from app.schemas.ai import AIApplySuggestionsRequest, AIApplySuggestionsResponse
 from app.schemas.ai import AiConsultRequest, AiConsultResponse
-from app.schemas.reports import Period, Totals, CategoryBreakdown, TransactionBrief
+from app.schemas.reports import Totals
 from app.api import reports as rep
 from app.api.transaction import suggest_categories
 from app.api.transaction import apply_suggestions as tx_apply_suggestions

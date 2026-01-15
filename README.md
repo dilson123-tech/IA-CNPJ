@@ -56,3 +56,30 @@ curl -sS -X POST \
 "$API/transactions/apply-suggestions?company_id=1&start=2026-01-01&end=2026-01-31&limit=200" | jq
 ```
 
+## Smoke tests (AI suggest/apply)
+
+Esse teste garante que o fluxo **AI → sugerir categoria → aplicar categoria** está funcionando de ponta a ponta,
+de forma **determinística** (valida pelo `TX_ID` criado no próprio smoke).
+
+**Pré-requisitos**
+- Backend rodando em `http://127.0.0.1:8100`
+- `curl` e `jq` instalados
+
+**Rodar**
+```bash
+cd backend
+bash -n scripts/smoke_ai_apply.sh && echo "BASH OK ✅"
+./scripts/smoke_ai_apply.sh
+```
+
+**O que valida**
+- `/health` responde OK
+- cria uma transação **sem categoria** com tag `__SMOKE_AI__...`
+- `/ai/suggest-categories` retorna sugestão para aquele `TX_ID`
+- `/ai/apply-suggestions` aplica e o `TX_ID` fica com `category_id` esperado
+
+**Config via env (opcional)**
+```bash
+API=http://127.0.0.1:8100 COMPANY_ID=1 START=2026-01-01 END=2026-01-31 LIMIT=200 ./scripts/smoke_ai_apply.sh
+```
+- trigger CI checks for branch protection

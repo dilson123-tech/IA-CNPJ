@@ -64,9 +64,11 @@ class AISuggestCategoriesResponse(BaseModel):
 from pydantic import BaseModel, Field
 
 class AIApplySuggestionsRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     company_id: int = Field(..., ge=1)
-    start: str | None = None
-    end: str | None = None
+    start: str | None = Field(default=None, validation_alias=AliasChoices("start", "start_date"))
+    end: str | None = Field(default=None, validation_alias=AliasChoices("end", "end_date"))
     limit: int = Field(200, ge=1, le=500)
     dry_run: bool = False
     include_no_match: bool = False
