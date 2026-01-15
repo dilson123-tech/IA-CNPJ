@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case, select, desc
+from sqlalchemy import func, case, select
 
 from app.db import get_db
 from app.models.transaction import Transaction
 from app.models.company import Company
 from app.models.category import Category
-from app.schemas.reports import CategoryBreakdown, ContextResponse, DailyResponse, Period, SummaryResponse, TopCategoriesResponse, Totals, TransactionBrief
+from app.schemas.reports import CategoryBreakdown, ContextResponse, DailyResponse, Period, SummaryResponse, TopCategoriesResponse, Totals, TransactionBrief, DailyPoint
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
