@@ -1,7 +1,61 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# --- CI/SMOKE: garante 1 SQLite absoluto (alembic + uvicorn) ---
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  BACKEND_DIR="${ROOT_DIR}/backend"
+  CI_DB_PATH="${BACKEND_DIR}/.ci/ci.sqlite"
+  mkdir -p "$(dirname "${CI_DB_PATH}")"
+  export DATABASE_URL="sqlite:///${CI_DB_PATH}"
+  echo "🗄️  CI DATABASE_URL=${DATABASE_URL}"
+fi
+# --- end CI/SMOKE ---
+
+
+
+
+# --- CI: dump do uvicorn log em qualquer erro ---
+dump_uvicorn_log_on_err() {
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    local port="${PORT:-8100}"
+    local log="/tmp/ia-cnpj_uvicorn_${port}.log"
+    if [ -f "$log" ]; then
+      echo ""
+      echo "---- tail $log (ultimas 220 linhas) ----"
+      tail -n 220 "$log" || true
+      echo "---- end ----"
+      echo ""
+    fi
+  fi
+}
+trap dump_uvicorn_log_on_err ERR
+# ----------------------------------------------
+# --- CI: DB sqlite unico (alembic + app) ---
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+  CI_DB="${IA_CNPJ_CI_DB:-$ROOT_DIR/backend/.ci/ci.sqlite}"
+  export DATABASE_URL="sqlite:///${CI_DB}"
+  rm -f "${CI_DB}"  # garante estado limpo/idempotente no CI
+fi
+# -----------------------------------------
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# --- CI bootstrap: cria venv se não existir (runner não vem com .venv) ---
+VENV_ACT="$ROOT/backend/.venv/bin/activate"
+if [ ! -f "$VENV_ACT" ]; then
+  echo "⚙️  criando venv em $ROOT/backend/.venv (CI)"
+  python -m venv "$ROOT/backend/.venv"
+  # shellcheck disable=SC1090
+  source "$VENV_ACT"
+  python -m pip install -U pip
+  pip install -r "$ROOT/backend/requirements.txt" -r "$ROOT/backend/requirements-dev.txt"
+else
+  # shellcheck disable=SC1090
+  source "$VENV_ACT"
+fi
+# ---------------------------------------------------------------------------
+
 BACKEND="$ROOT/backend"
 VENV_ACT="$BACKEND/.venv/bin/activate"
 ALEMBIC_INI="$BACKEND/alembic.ini"
@@ -35,7 +89,8 @@ echo "[1/4] alembic upgrade head"
 alembic upgrade head
 
 LOG="/tmp/ia-cnpj_uvicorn_${PORT}.log"
-echo "[2/4] subindo uvicorn em ${BIND_HOST}:${PORT} (bg) | log: ${LOG}"
+env DATABASE_URL="${DATABASE_URL:-}" echo "[2/4] subindo uvicorn em ${BIND_HOST}:${PORT} (bg) | log: ${LOG}"
+echo "�� DATABASE_URL=${DATABASE_URL:-<empty>}"
 uvicorn "$UVICORN_APP" --host "$BIND_HOST" --port "$PORT" --log-level info >"$LOG" 2>&1 &
 UV_PID=$!
 

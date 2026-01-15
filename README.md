@@ -82,3 +82,4 @@ bash -n scripts/smoke_ai_apply.sh && echo "BASH OK ✅"
 ```bash
 API=http://127.0.0.1:8100 COMPANY_ID=1 START=2026-01-01 END=2026-01-31 LIMIT=200 ./scripts/smoke_ai_apply.sh
 ```
+- trigger CI checks for branch protection
