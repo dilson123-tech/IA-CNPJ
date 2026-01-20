@@ -150,7 +150,7 @@ def suggest_categories(
 ):
     """
     Sugere categoria para transações sem categoria (rule-based).
-    Retorna lista: {id, suggested_category_id, confidence, rule, description}
+    Retorna lista: {id, suggested_category_id, confidence, rule, description, provider, reason, signals}
     """
     rep._ensure_company(db, company_id)
     start_dt, end_dt, _period = rep._resolve_period(start, end)
@@ -181,9 +181,14 @@ def suggest_categories(
     for r in rows:
         desc = _normalize_text(r.description or "")
         suggested = None
+        matched_kw = None
         for rule in rules:
-            if any(k in desc for k in rule["keywords"]):
-                suggested = rule
+            for k in rule["keywords"]:
+                if k in desc:
+                    suggested = rule
+                    matched_kw = k
+                    break
+            if suggested:
                 break
         if suggested:
             out.append({
@@ -192,6 +197,10 @@ def suggest_categories(
                 "confidence": suggested["confidence"],
                 "rule": suggested["rule"],
                 "description": r.description or "",
+                # D11: auditável
+                "provider": "rule-based",
+                "reason": (f"keyword match: {matched_kw}" if matched_kw else f"matched rule: {suggested['rule']}"),
+                "signals": ([f"rule:{suggested['rule']}"] + ([f"kw:{matched_kw}"] if matched_kw else [])),
             })
         elif include_no_match:
             out.append({
@@ -200,6 +209,10 @@ def suggest_categories(
                 "confidence": 0.0,
                 "rule": "no_match",
                 "description": r.description or "",
+                # D11: auditável
+                "provider": "rule-based",
+                "reason": "no keyword match",
+                "signals": ["rule:no_match"],
             })
     # por padrão, NÃO devolve no_match (só sugestões aplicáveis)
     if not include_no_match:
