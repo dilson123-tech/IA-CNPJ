@@ -51,6 +51,11 @@ class AISuggestedItem(BaseModel):
     rule: str = "no_match"
     description: str = ""
 
+    # D11: contrato enterprise (auditável)
+    reason: str = ""
+    provider: str = "rule-based"
+    signals: list[str] = Field(default_factory=list)
+
 
 class AISuggestCategoriesResponse(BaseModel):
     company_id: int
@@ -61,7 +66,6 @@ class AISuggestCategoriesResponse(BaseModel):
 # D07: AI facade - apply suggestions (determinístico por enquanto)
 # -----------------------------
 
-from pydantic import BaseModel, Field
 
 class AIApplySuggestionsRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)

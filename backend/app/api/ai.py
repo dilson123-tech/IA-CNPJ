@@ -189,8 +189,48 @@ def ai_suggest_categories(payload: AISuggestCategoriesRequest, db: Session = Dep
         data["period"] = per
 
         data.setdefault("items", [])
-        return data
 
+        # D11: normaliza itens do provider para o contrato enterprise (auditável)
+        try:
+            from app.ai.provider import get_provider_config
+            _enabled, _prov_name = get_provider_config()
+        except Exception:
+            _enabled, _prov_name = True, "ai"
+        _prov_name = (str(_prov_name or "ai") or "ai").strip()
+
+        _items = data.get("items") or []
+        _norm = []
+        for it in _items:
+            if hasattr(it, "model_dump"):
+                it = it.model_dump()
+            elif hasattr(it, "dict"):
+                it = it.dict()
+            if not isinstance(it, dict):
+                continue
+
+            # compat: provider pode vir com transaction_id em vez de id
+            if "id" not in it and "transaction_id" in it:
+                it["id"] = it.get("transaction_id")
+
+            # defaults D11 (não quebram nada)
+            it.setdefault("provider", _prov_name if _enabled else "rule-based")
+            it.setdefault("reason", "")
+            sig = it.get("signals")
+            if sig is None:
+                it["signals"] = []
+            elif not isinstance(sig, list):
+                it["signals"] = [str(sig)]
+
+            # compat com schema antigo
+            it.setdefault("rule", "ai")
+            it.setdefault("description", "")
+            it.setdefault("confidence", 0.0)
+            it.setdefault("suggested_category_id", None)
+
+            _norm.append(it)
+
+        data["items"] = _norm
+        return data
     # fallback determinístico
     items = suggest_categories(
         company_id=payload.company_id,
