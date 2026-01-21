@@ -105,7 +105,7 @@ def consult(payload: AiConsultRequest, db: Session = Depends(get_db)):
             actions=actions,
             numbers=totals,
             top_categories=top_categories,
-            recent_transactions=ctx.recent_transactions,  # já vem no formato schema
+            recent_transactions=ctx.recent_transactions[:20],  # já vem no formato schema
         )
 
     except HTTPException:
