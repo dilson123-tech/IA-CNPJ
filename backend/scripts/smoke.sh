@@ -115,14 +115,14 @@ if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp
   seed_url="$BASE/companies"
   seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
     -H 'Content-Type: application/json' \
-    -d "{\"name\":\"__SMOKE_COMPANY__\",\"cnpj\":\"00000000000000\",\"razao_social\":\"__SMOKE_COMPANY__\"}")"
+    -d '{\"cnpj\":\"12345678000195\",\"razao_social\":\"__SMOKE_COMPANY__ LTDA\"}')"
 
   # fallback pra /api/v1/companies se necessário
   if [ "$seed_code" = "404" ]; then
     seed_url="$BASE/api/v1/companies"
     seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
-      -d "{\"name\":\"__SMOKE_COMPANY__\",\"cnpj\":\"00000000000000\",\"razao_social\":\"__SMOKE_COMPANY__\"}")"
+      -d '{\"cnpj\":\"12345678000195\",\"razao_social\":\"__SMOKE_COMPANY__ LTDA\"}')"
   fi
 
   if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ]; then
@@ -132,6 +132,11 @@ if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp
   fi
 
   echo "✅ seed company OK ($seed_url). Retentando consult..."
+  seed_new_id="$(jq -r '.id // .company_id // empty' "$seed_tmp" 2>/dev/null || true)"
+  if [ -n "$seed_new_id" ] && [ "$seed_new_id" != "null" ]; then
+    COMPANY_ID="$seed_new_id"
+    echo "ℹ️ usando COMPANY_ID=$COMPANY_ID (retornado pelo seed)"
+  fi
   code="$(call_consult "$consult_url")"
 fi
 
