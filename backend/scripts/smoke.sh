@@ -115,20 +115,38 @@ if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp
   seed_url="$BASE/companies"
   seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
     -H 'Content-Type: application/json' \
-    -d '{\"cnpj\":\"12345678000195\",\"razao_social\":\"__SMOKE_COMPANY__ LTDA\"}')"
+    -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}')"
 
   # fallback pra /api/v1/companies se necessário
   if [ "$seed_code" = "404" ]; then
     seed_url="$BASE/api/v1/companies"
     seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
-      -d '{\"cnpj\":\"12345678000195\",\"razao_social\":\"__SMOKE_COMPANY__ LTDA\"}')"
+      -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}')"
   fi
-
-  if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ]; then
+  if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ] && [ "$seed_code" != "409" ]; then
     echo "❌ seed company falhou HTTP $seed_code ($seed_url)"
     cat "$seed_tmp" | jq . || cat "$seed_tmp"
     exit 1
+  fi
+  if [ "$seed_code" = "409" ]; then
+    echo "ℹ️ seed retornou 409 (CNPJ já cadastrado); buscando id existente..."
+    lookup_tmp="/tmp/ai_consult_lookup_company.json"
+    lookup_url="$seed_url"
+    lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url")"
+    if [ "$lookup_code" = "404" ]; then
+      lookup_url="$BASE/api/v1/companies"
+      lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url")"
+    fi
+    existing_id="$(jq -r --arg c "12345678000195" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
+    if [ -z "$existing_id" ] || [ "$existing_id" = "null" ]; then
+      echo "❌ lookup de company por CNPJ falhou (HTTP $lookup_code $lookup_url)"
+      cat "$lookup_tmp" | jq . || cat "$lookup_tmp"
+      exit 1
+    fi
+    COMPANY_ID="$existing_id"
+    consult_url="$(echo "$consult_url" | sed -E "s/(company_id=)[0-9]+/\1$COMPANY_ID/")"
+    echo "ℹ️ usando COMPANY_ID=$COMPANY_ID (lookup por cnpj)"
   fi
 
   echo "✅ seed company OK ($seed_url). Retentando consult..."
