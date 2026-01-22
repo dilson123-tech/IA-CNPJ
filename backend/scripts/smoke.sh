@@ -84,17 +84,59 @@ echo "OK"
 step 11 "/ai/consult"
 
 
+
 # contrato mínimo do /ai/consult (não quebra cliente)
 echo
 echo "[contract] /ai/consult shape + caps"
 
 tmp="/tmp/ai_consult_contract.json"
-code="$(curl -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$BASE_API/ai/consult" \
-  -H 'Content-Type: application/json' \
-  -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":20,\"question\":\"onde estou gastando mais?\"}")"
+
+call_consult () {
+  local url="$1"
+  curl -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$url" \
+    -H 'Content-Type: application/json' \
+    -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":20,\"question\":\"onde estou gastando mais?\"}"
+}
+
+consult_url="$BASE/ai/consult"
+code="$(call_consult "$consult_url")"
+
+# fallback pra /api/v1 se for Not Found "puro" (rota errada)
+if [ "$code" = "404" ] && jq -e '.detail=="Not Found"' "$tmp" >/dev/null 2>&1; then
+  consult_url="$BASE/api/v1/ai/consult"
+  code="$(call_consult "$consult_url")"
+fi
+
+# se faltar company, tenta seed + retry 1x (CI às vezes vem DB zerado)
+if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp" >/dev/null 2>&1; then
+  echo "ℹ️ company_id=$COMPANY_ID não existe; tentando seed..."
+
+  seed_tmp="/tmp/ai_consult_seed_company.json"
+  seed_url="$BASE/companies"
+  seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"__SMOKE_COMPANY__\"}")"
+
+  # fallback pra /api/v1/companies se necessário
+  if [ "$seed_code" = "404" ]; then
+    seed_url="$BASE/api/v1/companies"
+    seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+      -H 'Content-Type: application/json' \
+      -d "{\"name\":\"__SMOKE_COMPANY__\"}")"
+  fi
+
+  if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ]; then
+    echo "❌ seed company falhou HTTP $seed_code ($seed_url)"
+    cat "$seed_tmp" | jq . || cat "$seed_tmp"
+    exit 1
+  fi
+
+  echo "✅ seed company OK ($seed_url). Retentando consult..."
+  code="$(call_consult "$consult_url")"
+fi
 
 if [ "$code" != "200" ]; then
-  echo "❌ /ai/consult HTTP $code"
+  echo "❌ /ai/consult HTTP $code ($consult_url)"
   echo "---- body ----"
   cat "$tmp" || true
   echo "--------------"
@@ -121,6 +163,7 @@ jq -e '
 }
 
 echo "OK"
+
 
 curl -sS --max-time 6 -H 'Content-Type: application/json' \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":10,\"question\":\"smoke\"}" \
