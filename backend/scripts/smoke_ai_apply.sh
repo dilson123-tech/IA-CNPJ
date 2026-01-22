@@ -44,6 +44,18 @@ _curl_json() {
 : "${INCLUDE_NO_MATCH:=true}"
 
 API="${API_CNPJ:-http://127.0.0.1:8100}"
+
+# autodetect prefix (/api/v1) via OpenAPI (compat)
+API_PREFIX="${API_PREFIX:-}"
+if [ -z "${API_PREFIX}" ]; then
+  oa="$(curl -sS --max-time 6 "${API}/openapi.json" || true)"
+  if echo "$oa" | grep -q '"/api/v1/ai/consult"'; then
+    API_PREFIX="/api/v1"
+  else
+    API_PREFIX=""
+  fi
+fi
+echo "[smoke] API_PREFIX=$API_PREFIX"
 COMPANY_ID="${COMPANY_ID:-1}"
 START="${START:-2026-01-01}"
 END="${END:-2026-01-31}"
