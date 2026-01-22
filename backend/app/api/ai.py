@@ -3,9 +3,12 @@ from __future__ import annotations
 from app.ai.provider import provider_suggest_categories
 import os
 import traceback
+import logging
+from uuid import uuid4
+from time import perf_counter
 
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -20,6 +23,8 @@ from app.api.transaction import apply_suggestions as tx_apply_suggestions
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
+logger = logging.getLogger(__name__)
+
 
 def _fmt_brl(cents: int) -> str:
     v = cents / 100.0
@@ -28,7 +33,9 @@ def _fmt_brl(cents: int) -> str:
 
 
 @router.post("/consult", response_model=AiConsultResponse)
-def consult(payload: AiConsultRequest, db: Session = Depends(get_db)):
+def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(get_db)):
+    request_id = request.headers.get('x-request-id') or uuid4().hex
+    t0 = perf_counter()
     try:
         rep._ensure_company(db, payload.company_id)
         # reaproveita helpers do reports (mesma lógica do período)
@@ -94,6 +101,54 @@ def consult(payload: AiConsultRequest, db: Session = Depends(get_db)):
 
         # top categories (limita)
         top_categories = by_cat[:8]
+
+        # observabilidade mínima (sem dados sensíveis)
+
+
+        semcat = next((c for c in by_cat if getattr(c, 'category_id', None) is None), None)
+
+
+        try:
+
+
+            top_out = max(by_cat, key=lambda c: int(getattr(c, 'saidas_cents', 0) or 0)) if by_cat else None
+
+
+            top_out_cents = int(getattr(top_out, 'saidas_cents', 0) or 0) if top_out else 0
+
+
+            top_out_pct = round((top_out_cents / saidas) * 100.0, 1) if saidas > 0 else 0.0
+
+
+        except Exception:
+
+
+            top_out_pct = 0.0
+
+
+        duration_ms = int((perf_counter() - t0) * 1000)
+
+
+        logger.info(
+
+
+            "ai_consult ok request_id=%s company_id=%s start=%s end=%s duration_ms=%s qtd_tx=%s qtd_sem_categoria=%s top_out_pct=%s",
+
+
+            request_id, payload.company_id, payload.start, payload.end, duration_ms,
+
+
+            getattr(totals, 'qtd_transacoes', None),
+
+
+            getattr(semcat, 'qtd_transacoes', 0) if semcat else 0,
+
+
+            top_out_pct,
+
+
+        )
+
 
         return AiConsultResponse(
             company_id=payload.company_id,
