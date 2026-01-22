@@ -67,6 +67,29 @@ echo "OK"
 
 
 step 11 "/ai/consult"
+
+# contrato mínimo do /ai/consult (não quebra cliente)
+echo
+echo "[contract] /ai/consult shape + caps"
+resp="$(curl -sS --max-time 6 "$BASE/ai/consult" -H 'Content-Type: application/json' \
+  -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":20,\"question\":\"onde estou gastando mais?\"}")"
+
+echo "$resp" | jq -e '
+  (.company_id|type=="number") and
+  (.period|type=="object") and
+  (.period.start|type=="string") and
+  (.period.end|type=="string") and
+  (.headline|type=="string") and
+  (.insights|type=="array") and
+  (.risks|type=="array") and
+  (.actions|type=="array") and
+  (.top_categories|type=="array") and
+  (.recent_transactions|type=="array") and
+  ((.top_categories|length) <= 8) and
+  ((.recent_transactions|length) <= 20)
+' >/dev/null
+
+echo "OK"
 curl -sS --max-time 6 -H 'Content-Type: application/json' \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":10,\"question\":\"smoke\"}" \
   "$BASE/ai/consult" | jq -e . >/dev/null
