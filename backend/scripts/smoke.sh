@@ -68,13 +68,25 @@ echo "OK"
 
 step 11 "/ai/consult"
 
+
 # contrato mínimo do /ai/consult (não quebra cliente)
 echo
 echo "[contract] /ai/consult shape + caps"
-resp="$(curl -sS --max-time 6 "$BASE/ai/consult" -H 'Content-Type: application/json' \
+
+tmp="/tmp/ai_consult_contract.json"
+code="$(curl -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$BASE/ai/consult" \
+  -H 'Content-Type: application/json' \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":20,\"question\":\"onde estou gastando mais?\"}")"
 
-echo "$resp" | jq -e '
+if [ "$code" != "200" ]; then
+  echo "❌ /ai/consult HTTP $code"
+  echo "---- body ----"
+  cat "$tmp" || true
+  echo "--------------"
+  exit 1
+fi
+
+jq -e '
   (.company_id|type=="number") and
   (.period|type=="object") and
   (.period.start|type=="string") and
@@ -87,9 +99,14 @@ echo "$resp" | jq -e '
   (.recent_transactions|type=="array") and
   ((.top_categories|length) <= 8) and
   ((.recent_transactions|length) <= 20)
-' >/dev/null
+' "$tmp" >/dev/null || {
+  echo "❌ /ai/consult fora do contrato (dump abaixo)"
+  cat "$tmp" | jq . || cat "$tmp"
+  exit 1
+}
 
 echo "OK"
+
 curl -sS --max-time 6 -H 'Content-Type: application/json' \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":10,\"question\":\"smoke\"}" \
   "$BASE/ai/consult" | jq -e . >/dev/null
