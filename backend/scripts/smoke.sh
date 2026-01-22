@@ -115,14 +115,14 @@ if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp
   seed_url="$BASE/companies"
   seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
     -H 'Content-Type: application/json' \
-    -d "{\"name\":\"__SMOKE_COMPANY__\"}")"
+    -d "{\"name\":\"__SMOKE_COMPANY__\",\"cnpj\":\"00000000000000\",\"razao_social\":\"__SMOKE_COMPANY__\"}")"
 
   # fallback pra /api/v1/companies se necessário
   if [ "$seed_code" = "404" ]; then
     seed_url="$BASE/api/v1/companies"
     seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
-      -d "{\"name\":\"__SMOKE_COMPANY__\"}")"
+      -d "{\"name\":\"__SMOKE_COMPANY__\",\"cnpj\":\"00000000000000\",\"razao_social\":\"__SMOKE_COMPANY__\"}")"
   fi
 
   if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ]; then
