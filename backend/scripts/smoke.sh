@@ -5,15 +5,18 @@ BASE="${BASE:-http://127.0.0.1:8100}"
 
 # autodetect prefix (/api/v1) via OpenAPI (compat)
 API_PREFIX="${API_PREFIX:-}"
-if [ -z "${API_PREFIX}" ]; then
-  oa="$(curl -sS --max-time 6 "${BASE}/openapi.json" || true)"
-  if echo "$oa" | grep -q '"/api/v1/ai/consult"'; then
+if [ -z "$API_PREFIX" ]; then
+  oa="$(curl -sS --max-time 6 "$BASE/openapi.json" || true)"
+  if echo "$oa" | jq -e '.paths["/api/v1/ai/consult"]' >/dev/null 2>&1; then
     API_PREFIX="/api/v1"
   else
     API_PREFIX=""
   fi
 fi
-echo "[smoke] API_PREFIX=$API_PREFIX"
+BASE_API="$BASE$API_PREFIX"
+echo "[smoke] API_PREFIX=$API_PREFIX BASE_API=$BASE_API"
+
+
 COMPANY_ID="${COMPANY_ID:-1}"
 START="${START:-2026-01-01}"
 END="${END:-2026-01-31}"
@@ -30,51 +33,51 @@ curl -sS --max-time 4 "$BASE/health" | jq -e . >/dev/null
 echo "OK"
 
 step 2 "/reports/context"
-curl -sS --max-time 6 "$BASE/reports/context?company_id=$COMPANY_ID&start=$START&end=$END&limit=$LIMIT" | jq -e . >/dev/null
+curl -sS --max-time 6 "$BASE_API/reports/context?company_id=$COMPANY_ID&start=$START&end=$END&limit=$LIMIT" | jq -e . >/dev/null
 echo "OK"
 
 step 3 "/reports/top-categories"
-curl -sS --max-time 6 "$BASE/reports/top-categories?company_id=$COMPANY_ID&start=$START&end=$END&metric=saidas&limit=5" | jq -e . >/dev/null
+curl -sS --max-time 6 "$BASE_API/reports/top-categories?company_id=$COMPANY_ID&start=$START&end=$END&metric=saidas&limit=5" | jq -e . >/dev/null
 echo "OK"
 
 step 4 "/transactions/uncategorized"
-curl -sS --max-time 6 "$BASE/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=50" | jq -e . >/dev/null
+curl -sS --max-time 6 "$BASE_API/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=50" | jq -e . >/dev/null
 echo "OK"
 
 step 5 "/transactions/bulk-categorize"
 # pega uncategorized e monta payload items -> seta categoria 1
-PAYLOAD="$(curl -sS --max-time 6 "$BASE/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" \
+PAYLOAD="$(curl -sS --max-time 6 "$BASE_API/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" \
 | jq -c '{company_id: '"$COMPANY_ID"', items: map({id: .id, category_id: 1})}')"
-curl -sS --max-time 10 -X POST "$BASE/transactions/bulk-categorize" \
+curl -sS --max-time 10 -X POST "$BASE_API/transactions/bulk-categorize" \
   -H 'Content-Type: application/json' -d "$PAYLOAD" | jq -e . >/dev/null
 echo "OK"
 
 
 step 6 "/transactions/apply-suggestions (dry-run)"
-curl -sS --max-time 8 -X POST   "$BASE/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200&dry_run=true" | jq -e . >/dev/null
+curl -sS --max-time 8 -X POST   "$BASE_API/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200&dry_run=true" | jq -e . >/dev/null
 echo "OK"
 
 step 7 "/transactions/apply-suggestions (apply)"
-curl -sS --max-time 8 -X POST   "$BASE/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" | jq -e . >/dev/null
+curl -sS --max-time 8 -X POST   "$BASE_API/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" | jq -e . >/dev/null
 echo "OK"
 
 
   step 8 "/ai/suggest-categories"
   curl -sS --max-time 8 -H 'Content-Type: application/json' \
     -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":50,\"include_no_match\":true}" \
-    "$BASE/ai/suggest-categories" | jq -e . >/dev/null
+    "$BASE_API/ai/suggest-categories" | jq -e . >/dev/null
   echo "OK"
 
   step 9 "/ai/apply-suggestions (dry-run)"
   curl -sS --max-time 10 -H 'Content-Type: application/json' \
     -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":200,\"dry_run\":true,\"include_no_match\":true}" \
-    "$BASE/ai/apply-suggestions" | jq -e . >/dev/null
+    "$BASE_API/ai/apply-suggestions" | jq -e . >/dev/null
   echo "OK"
 
   step 10 "/ai/apply-suggestions (apply)"
   curl -sS --max-time 10 -H 'Content-Type: application/json' \
     -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":200,\"dry_run\":false}" \
-    "$BASE/ai/apply-suggestions" | jq -e . >/dev/null
+    "$BASE_API/ai/apply-suggestions" | jq -e . >/dev/null
   echo "OK"
 
 
@@ -86,7 +89,7 @@ echo
 echo "[contract] /ai/consult shape + caps"
 
 tmp="/tmp/ai_consult_contract.json"
-code="$(curl -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$BASE/ai/consult" \
+code="$(curl -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$BASE_API/ai/consult" \
   -H 'Content-Type: application/json' \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":20,\"question\":\"onde estou gastando mais?\"}")"
 
@@ -121,7 +124,7 @@ echo "OK"
 
 curl -sS --max-time 6 -H 'Content-Type: application/json' \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":10,\"question\":\"smoke\"}" \
-  "$BASE/ai/consult" | jq -e . >/dev/null
+  "$BASE_API/ai/consult" | jq -e . >/dev/null
 echo "OK"
 
 echo
