@@ -27,3 +27,25 @@ Fase 5 - Produto comercial (planos, onboarding, métricas)
 - Integração Open Finance/CSV
 - Exportação PDF/WhatsApp
 - Multi-empresa (matriz/filiais)
+
+## Checkpoints (stables)
+
+### 2026-01-24 — Smoke DB-zerado proof ✅ (CI green)
+Entregue: smoke “à prova de DB zerado” (seed/lookup por CNPJ), hardening fail-fast e documentação.
+
+- PRs: #17 #18 #19
+- Tags:
+  - stable/2026-01-24-smoke-hardening
+  - stable/2026-01-24-smoke-ai-ensure-company
+  - stable/2026-01-24-readme-smoke
+- Garantias:
+  - smoke valida HTTP 2xx + JSON (fail-fast)
+  - preflight ensure_company (seed/lookup por CNPJ)
+  - bulk-categorize vira skip quando não há uncategorized
+  - smoke_ai_apply valida fluxo AI suggest/apply + idempotência (re-apply dry_run=0)
+
+### 2026-01-22 — Baseline smoke + contrato /ai/consult ✅
+- Tags:
+  - stable/2026-01-22-smoke
+  - stable/2026-01-22
+
