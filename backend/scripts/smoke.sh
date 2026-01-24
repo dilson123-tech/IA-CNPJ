@@ -25,60 +25,177 @@ LIMIT="${LIMIT:-5}"
 TOTAL=11
 step(){ echo; echo "[$1/$TOTAL] $2"; }
 
+fail() { echo "❌ $*"; exit 1; }
+
+# req_json <timeout> <METHOD> <URL> <OUTFILE> [curl_args...]
+# - salva body em OUTFILE
+# - valida HTTP 2xx
+# - valida JSON (jq)
+req_json() {
+  local timeout="$1"; local method="$2"; local url="$3"; local out="$4"; shift 4
+  local code
+  code="$(curl -sS --max-time "$timeout" -o "$out" -w '%{http_code}' -X "$method" "$url" "$@" || echo "000")"
+
+  if [[ ! "$code" =~ ^2[0-9][0-9]$ ]]; then
+    echo "❌ HTTP $code $method $url"
+    if [ -s "$out" ]; then cat "$out" | jq . >/dev/null 2>&1 && cat "$out" | jq . || cat "$out"; else echo "(sem body)"; fi
+    return 1
+  fi
+
+  if ! jq -e . "$out" >/dev/null 2>&1; then
+    echo "❌ JSON inválido $method $url"
+    cat "$out" || true
+    return 1
+  fi
+  return 0
+}
+
+# garante COMPANY_ID válido (DB zerado proof)
+SMOKE_CNPJ="${SMOKE_CNPJ:-12345678000195}"
+SMOKE_RAZAO="${SMOKE_RAZAO:-__SMOKE_COMPANY__ LTDA}"
+
+ensure_company() {
+  # sanitize CR invisível
+  COMPANY_ID="${COMPANY_ID//$'^M'/}"
+
+  if [[ ! "$COMPANY_ID" =~ ^[0-9]+$ ]]; then
+    echo "❌ COMPANY_ID inválido: $COMPANY_ID"
+    return 1
+  fi
+
+  get_tmp="/tmp/smoke_pre_company_get.json"
+  get_code="$(curl -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$BASE/companies/$COMPANY_ID" || echo "000")"
+
+  if [[ "$get_code" =~ ^2[0-9][0-9]$ ]]; then
+    # existe
+    return 0
+  fi
+
+  echo "ℹ️ preflight: company_id=$COMPANY_ID não existe (HTTP $get_code); seed/lookup por CNPJ..."
+
+  payload="$(jq -nc --arg cnpj "$SMOKE_CNPJ" --arg rs "$SMOKE_RAZAO" '{cnpj:$cnpj, razao_social:$rs}')"
+
+  seed_tmp="/tmp/smoke_pre_seed_company.json"
+  seed_url="$BASE/companies"
+  seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+    -H 'Content-Type: application/json' \
+    -d "$payload" || echo "000")"
+
+  if [ "$seed_code" = "404" ]; then
+    seed_url="$BASE/api/v1/companies"
+    seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+      -H 'Content-Type: application/json' \
+      -d "$payload" || echo "000")"
+  fi
+
+  if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ] && [ "$seed_code" != "409" ]; then
+    echo "❌ preflight seed falhou HTTP $seed_code ($seed_url)"
+    cat "$seed_tmp" | jq . >/dev/null 2>&1 && cat "$seed_tmp" | jq . || cat "$seed_tmp"
+    return 1
+  fi
+
+  if [ "$seed_code" = "409" ]; then
+    echo "ℹ️ preflight: 409 (CNPJ já cadastrado); buscando id existente..."
+    lookup_tmp="/tmp/smoke_pre_lookup_companies.json"
+    lookup_url="$seed_url"
+    lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+    if [ "$lookup_code" = "404" ]; then
+      lookup_url="$BASE/api/v1/companies"
+      lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+    fi
+    existing_id="$(jq -r --arg c "$SMOKE_CNPJ" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
+    if [ -z "$existing_id" ] || [ "$existing_id" = "null" ]; then
+      echo "❌ preflight lookup por CNPJ falhou (HTTP $lookup_code $lookup_url)"
+      cat "$lookup_tmp" | jq . >/dev/null 2>&1 && cat "$lookup_tmp" | jq . || cat "$lookup_tmp"
+      return 1
+    fi
+    COMPANY_ID="$existing_id"
+    echo "ℹ️ preflight: usando COMPANY_ID=$COMPANY_ID (lookup por cnpj)"
+    return 0
+  fi
+
+  seed_new_id="$(jq -r '.id // .company_id // empty' "$seed_tmp" 2>/dev/null | head -n1 || true)"
+  if [ -n "$seed_new_id" ] && [ "$seed_new_id" != "null" ]; then
+    COMPANY_ID="$seed_new_id"
+    echo "ℹ️ preflight: usando COMPANY_ID=$COMPANY_ID (retornado pelo seed)"
+  else
+    echo "ℹ️ preflight: seed sem id explícito (seguindo com COMPANY_ID=$COMPANY_ID)"
+  fi
+  return 0
+}
+
 echo "== IA-CNPJ SMOKE =="
 echo "BASE=$BASE COMPANY_ID=$COMPANY_ID START=$START END=$END"
 
 step 1 "/health"
-curl -sS --max-time 4 "$BASE/health" | jq -e . >/dev/null
+out="/tmp/smoke_01_health.json"
+req_json 4 GET "$BASE/health" "$out" || fail "step 1 falhou"
+echo "OK"
+
+echo "ℹ️ preflight: ensure company (COMPANY_ID=$COMPANY_ID)"
+ensure_company || fail "preflight company falhou"
 echo "OK"
 
 step 2 "/reports/context"
-curl -sS --max-time 6 "$BASE_API/reports/context?company_id=$COMPANY_ID&start=$START&end=$END&limit=$LIMIT" | jq -e . >/dev/null
+out="/tmp/smoke_02_reports_context.json"
+req_json 6 GET "$BASE_API/reports/context?company_id=$COMPANY_ID&start=$START&end=$END&limit=$LIMIT" "$out" || fail "step 2 falhou"
 echo "OK"
 
 step 3 "/reports/top-categories"
-curl -sS --max-time 6 "$BASE_API/reports/top-categories?company_id=$COMPANY_ID&start=$START&end=$END&metric=saidas&limit=5" | jq -e . >/dev/null
+out="/tmp/smoke_03_reports_top_categories.json"
+req_json 6 GET "$BASE_API/reports/top-categories?company_id=$COMPANY_ID&start=$START&end=$END&metric=saidas&limit=5" "$out" || fail "step 3 falhou"
 echo "OK"
 
 step 4 "/transactions/uncategorized"
-curl -sS --max-time 6 "$BASE_API/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=50" | jq -e . >/dev/null
+out="/tmp/smoke_04_tx_uncategorized.json"
+req_json 6 GET "$BASE_API/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=50" "$out" || fail "step 4 falhou"
 echo "OK"
 
 step 5 "/transactions/bulk-categorize"
-# pega uncategorized e monta payload items -> seta categoria 1
-PAYLOAD="$(curl -sS --max-time 6 "$BASE_API/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" \
-| jq -c '{company_id: '"$COMPANY_ID"', items: map({id: .id, category_id: 1})}')"
-curl -sS --max-time 10 -X POST "$BASE_API/transactions/bulk-categorize" \
-  -H 'Content-Type: application/json' -d "$PAYLOAD" | jq -e . >/dev/null
-echo "OK"
-
+# pega uncategorized e monta payload items -> seta categoria 1 (se houver)
+uncat="/tmp/smoke_05_uncat200.json"
+req_json 6 GET "$BASE_API/transactions/uncategorized?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" "$uncat" || fail "step 5 (GET uncat) falhou"
+n_uncat="$(jq 'length' "$uncat" 2>/dev/null || echo 0)"
+if [ "$n_uncat" = "0" ]; then
+  echo "OK (skip): sem uncategorized"
+else
+  PAYLOAD="$(jq -c --argjson cid "$COMPANY_ID" '{company_id: $cid, items: map({id: .id, category_id: 1})}' "$uncat")"
+  out="/tmp/smoke_05_bulk_categorize.json"
+  req_json 10 POST "$BASE_API/transactions/bulk-categorize" "$out" \
+    -H 'Content-Type: application/json' -d "$PAYLOAD" || fail "step 5 (POST bulk) falhou"
+  echo "OK"
+fi
 
 step 6 "/transactions/apply-suggestions (dry-run)"
-curl -sS --max-time 8 -X POST   "$BASE_API/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200&dry_run=true" | jq -e . >/dev/null
+out="/tmp/smoke_06_apply_suggestions_dry.json"
+req_json 8 POST "$BASE_API/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200&dry_run=true" "$out" || fail "step 6 falhou"
 echo "OK"
 
 step 7 "/transactions/apply-suggestions (apply)"
-curl -sS --max-time 8 -X POST   "$BASE_API/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" | jq -e . >/dev/null
+out="/tmp/smoke_07_apply_suggestions_apply.json"
+req_json 8 POST "$BASE_API/transactions/apply-suggestions?company_id=$COMPANY_ID&start=$START&end=$END&limit=200" "$out" || fail "step 7 falhou"
 echo "OK"
 
+step 8 "/ai/suggest-categories"
+out="/tmp/smoke_08_ai_suggest.json"
+req_json 8 POST "$BASE_API/ai/suggest-categories" "$out" \
+  -H 'Content-Type: application/json' \
+  -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":50,\"include_no_match\":true}" || fail "step 8 falhou"
+echo "OK"
 
-  step 8 "/ai/suggest-categories"
-  curl -sS --max-time 8 -H 'Content-Type: application/json' \
-    -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":50,\"include_no_match\":true}" \
-    "$BASE_API/ai/suggest-categories" | jq -e . >/dev/null
-  echo "OK"
+step 9 "/ai/apply-suggestions (dry-run)"
+out="/tmp/smoke_09_ai_apply_dry.json"
+req_json 10 POST "$BASE_API/ai/apply-suggestions" "$out" \
+  -H 'Content-Type: application/json' \
+  -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":200,\"dry_run\":true,\"include_no_match\":true}" || fail "step 9 falhou"
+echo "OK"
 
-  step 9 "/ai/apply-suggestions (dry-run)"
-  curl -sS --max-time 10 -H 'Content-Type: application/json' \
-    -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":200,\"dry_run\":true,\"include_no_match\":true}" \
-    "$BASE_API/ai/apply-suggestions" | jq -e . >/dev/null
-  echo "OK"
-
-  step 10 "/ai/apply-suggestions (apply)"
-  curl -sS --max-time 10 -H 'Content-Type: application/json' \
-    -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":200,\"dry_run\":false}" \
-    "$BASE_API/ai/apply-suggestions" | jq -e . >/dev/null
-  echo "OK"
+step 10 "/ai/apply-suggestions (apply)"
+out="/tmp/smoke_10_ai_apply_apply.json"
+req_json 10 POST "$BASE_API/ai/apply-suggestions" "$out" \
+  -H 'Content-Type: application/json' \
+  -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":200,\"dry_run\":false}" || fail "step 10 falhou"
+echo "OK"
 
 
 step 11 "/ai/consult"
