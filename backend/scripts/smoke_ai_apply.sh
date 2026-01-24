@@ -131,43 +131,60 @@ echo
 
 echo
 echo "[0/5] garante company_id=$COMPANY_ID (seed idempotente)"
-# sanitize: remove CR/LF/TAB/espacos (corrige porta 8100^M e quoting zoado)
-API="$(printf %s "$API" | tr -d '
-	 ')"
-COMPANY_ID="$(printf %s "$COMPANY_ID" | tr -d '
-	 ')"
+  # sanitize: remove CR/LF/TAB/espacos (corrige 8100^M e quoting zoado)
+  API="$(printf %s "$API" | tr -d '\r\n\t ')"
+  COMPANY_ID="$(printf %s "$COMPANY_ID" | tr -d '\r\n\t ')"
 
-# tenta GET /companies/{id}; se 404/erro, cria/recupera uma empresa mínima
-company_url="$API/companies/$COMPANY_ID"
-if ! curl -fsS --max-time 5 "$company_url" | jq -e .id >/dev/null 2>&1; then
-  echo "ℹ️ company_id=$COMPANY_ID não existe; criando/recuperando empresa smoke..."
-  CNPJ_SMOKE="00000000000191"
-  COMP_PAYLOAD="$(jq -nc --arg cnpj "$CNPJ_SMOKE" --arg rs "Empresa Smoke" '{cnpj:$cnpj, razao_social:$rs}')"
+  SMOKE_CNPJ="${SMOKE_CNPJ:-00000000000191}"
+  SMOKE_RAZAO="${SMOKE_RAZAO:-Empresa Smoke}"
 
-  seed_tmp="/tmp/smoke_ai_seed_company.json"
-  seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$API/companies" \
-    -H 'Content-Type: application/json' \
-    -d "$COMP_PAYLOAD")"
+  get_tmp="/tmp/smoke_ai_get_company.json"
+  get_url="$API/companies/$COMPANY_ID"
+  get_code="$(curl -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$get_url" || echo "000")"
 
-  if [ "$seed_code" = "409" ]; then
-    echo "ℹ️ CNPJ já cadastrado; buscando id existente..."
-    lookup_tmp="/tmp/smoke_ai_lookup_company.json"
-    curl -sS --max-time 6 -o "$lookup_tmp" "$API/companies" >/dev/null 2>&1 || true
-    new_id="$(jq -r --arg c "$CNPJ_SMOKE" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
-  elif [ "$seed_code" = "200" ] || [ "$seed_code" = "201" ]; then
-    new_id="$(jq -r '.id // .company_id // .data.id // .data.company_id // empty' "$seed_tmp" 2>/dev/null || true)"
+  if [[ "$get_code" =~ ^2[0-9][0-9]$ ]] && jq -e '.id' "$get_tmp" >/dev/null 2>&1; then
+    echo "OK: company_id=$COMPANY_ID existe"
   else
-    echo "❌ seed company smoke falhou HTTP $seed_code"
-    cat "$seed_tmp" | jq . || cat "$seed_tmp"
-    die "seed company smoke falhou"
-  fi
+    echo "ℹ️ company_id=$COMPANY_ID não existe (HTTP $get_code); criando/recuperando empresa smoke..."
 
-  [[ "$new_id" =~ ^[0-9]+$ ]] || die "id inválido ao criar/achar empresa: $new_id"
-  COMPANY_ID="$new_id"
-  echo "OK: usando company_id=$COMPANY_ID"
-else
-  echo "OK: company_id=$COMPANY_ID existe"
-fi
+    COMP_PAYLOAD="$(jq -nc --arg cnpj "$SMOKE_CNPJ" --arg rs "$SMOKE_RAZAO" '{cnpj:$cnpj, razao_social:$rs}')"
+
+    seed_tmp="/tmp/smoke_ai_seed_company.json"
+    seed_url="$API/companies"
+    seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+      -H 'Content-Type: application/json' \
+      -d "$COMP_PAYLOAD" || echo "000")"
+
+    # fallback /api/v1/companies
+    if [ "$seed_code" = "404" ]; then
+      seed_url="$API/api/v1/companies"
+      seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+        -H 'Content-Type: application/json' \
+        -d "$COMP_PAYLOAD" || echo "000")"
+    fi
+
+    if [ "$seed_code" = "409" ]; then
+      echo "ℹ️ CNPJ já cadastrado; buscando id existente..."
+      lookup_tmp="/tmp/smoke_ai_lookup_company.json"
+      lookup_url="$seed_url"
+      lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+      if [ "$lookup_code" = "404" ]; then
+        lookup_url="$API/api/v1/companies"
+        lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+      fi
+      new_id="$(jq -r --arg c "$SMOKE_CNPJ" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
+    elif [ "$seed_code" = "200" ] || [ "$seed_code" = "201" ]; then
+      new_id="$(jq -r '.id // .company_id // .data.id // .data.company_id // empty' "$seed_tmp" 2>/dev/null | head -n1 || true)"
+    else
+      echo "❌ seed company smoke falhou HTTP $seed_code ($seed_url)"
+      cat "$seed_tmp" | jq . >/dev/null 2>&1 && cat "$seed_tmp" | jq . || cat "$seed_tmp"
+      die "seed company smoke falhou"
+    fi
+
+    [[ "$new_id" =~ ^[0-9]+$ ]] || die "id inválido ao criar/achar empresa: $new_id"
+    COMPANY_ID="$new_id"
+    echo "OK: usando company_id=$COMPANY_ID"
+  fi
 
 echo "[1/5] health"
 curl -sS --max-time 5 "$API/health" | jq . >/dev/null
