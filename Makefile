@@ -11,11 +11,11 @@ PIP ?= $(VENV)/bin/pip
 PORT ?= 8100
 HOST ?= 127.0.0.1
 BIND_HOST ?= 0.0.0.0
-API_CNPJ ?= http://$\(HOST\):$\(PORT\)
+API_CNPJ ?= http://$(HOST):$(PORT)
 
 REQ ?= $(BACKEND)/requirements.txt
 
-.PHONY: help venv dev smoke api db
+.PHONY: api db dev help lint smoke venv
 
 help:
 	@echo "Targets:"
@@ -36,6 +36,10 @@ venv:
 	fi
 	@"$(PIP)" install --upgrade pip
 	@"$(PIP)" install -r "$(REQ)"
+	@if [ -f "$(BACKEND)/requirements-dev.txt" ]; then \
+	  echo "== instalando deps dev =="; \
+	  "$(PIP)" install -r "$(BACKEND)/requirements-dev.txt"; \
+	fi
 
 dev: venv
 	PORT=$(PORT) HOST=$(HOST) BIND_HOST=$(BIND_HOST) ./backend/scripts/dev_up_smoke.sh
@@ -48,3 +52,9 @@ api: venv
 
 db: venv
 	cd $(BACKEND) && source .venv/bin/activate && alembic upgrade head
+
+
+lint: venv
+	cd $(BACKEND) && source .venv/bin/activate && ruff check .
+	cd $(BACKEND) && source .venv/bin/activate && python -m compileall -q .
+	cd $(BACKEND) && find scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
