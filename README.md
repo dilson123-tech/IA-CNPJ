@@ -83,3 +83,31 @@ bash -n scripts/smoke_ai_apply.sh && echo "BASH OK ✅"
 API=http://127.0.0.1:8100 COMPANY_ID=1 START=2026-01-01 END=2026-01-31 LIMIT=200 ./scripts/smoke_ai_apply.sh
 ```
 - trigger CI checks for branch protection
+
+## Smoke (CI / local) — DB-zerado proof ✅
+
+Este repo tem smoke tests “à prova de DB zerado”: se `COMPANY_ID` não existir, os scripts fazem **seed/lookup por CNPJ** e seguem o baile.
+
+### Scripts
+- `backend/scripts/dev_up_smoke.sh`  
+  Sobe a API (migrations + uvicorn) e roda:
+  - `backend/scripts/smoke.sh` (core + contrato mínimo do `/ai/consult`)
+  - `backend/scripts/smoke_ai_apply.sh` (AI suggest/apply + idempotência)
+
+- `backend/scripts/smoke.sh`  
+  Hardening: valida **HTTP 2xx + JSON**, **fail-fast**, preflight `ensure_company` (seed/lookup por CNPJ) e `bulk-categorize` vira **skip** quando não há `uncategorized`.
+
+- `backend/scripts/smoke_ai_apply.sh`  
+  Garante empresa (seed idempotente), cria uma transação `category_id=null`, roda suggest/apply e checa idempotência.
+
+### Como rodar
+    # padrão
+    bash backend/scripts/dev_up_smoke.sh
+
+    # DB-zerado proof (company inexistente)
+    COMPANY_ID=999999 bash backend/scripts/dev_up_smoke.sh
+
+    # período custom
+    START=2026-01-01 END=2026-01-31 bash backend/scripts/dev_up_smoke.sh
+
+
