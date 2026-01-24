@@ -44,6 +44,17 @@ Entregue: smoke “à prova de DB zerado” (seed/lookup por CNPJ), hardening fa
   - bulk-categorize vira skip quando não há uncategorized
   - smoke_ai_apply valida fluxo AI suggest/apply + idempotência (re-apply dry_run=0)
 
+
+### 2026-01-24 — CI Quality Gate ✅ (bash -n + shellcheck)
+Entregue: quality gate no job `lint` para scripts bash (validação sintática + lint severo).
+
+- PR: #21
+- Tag:
+  - stable/2026-01-24-quality-gate
+- Garantias:
+  - `bash -n` em `backend/scripts/*.sh`
+  - `shellcheck -S error` (falha CI em warnings críticos)
+
 ### 2026-01-22 — Baseline smoke + contrato /ai/consult ✅
 - Tags:
   - stable/2026-01-22-smoke
