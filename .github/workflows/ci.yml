@@ -34,6 +34,17 @@ jobs:
 
       - name: Py compile
         run: python -m compileall -q .
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Shell scripts (bash -n + shellcheck)
+        shell: bash
+        run: |
+          set -euo pipefail
+          find scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+          find scripts -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -x -S error
 
   smoke:
     runs-on: ubuntu-latest
