@@ -55,6 +55,17 @@ Entregue: quality gate no job `lint` para scripts bash (validação sintática +
   - `bash -n` em `backend/scripts/*.sh`
   - `shellcheck -S error` (falha CI em warnings críticos)
 
+### 2026-01-24 — Lint padronizado ✅ (ruff + make lint)
+Entregue: padronização do lint local/CI com config do Ruff + alvo `make lint` (ruff + compileall + bash -n).
+
+- PR: #23
+- Tag:
+  - stable/2026-01-24-ruff-make-lint
+- Garantias:
+  - Ruff configurado via `backend/pyproject.toml` (atual: `select=["F"]`)
+  - `make lint` roda: ruff + `python -m compileall` + `bash -n` em `backend/scripts/*.sh`
+
+
 ### 2026-01-22 — Baseline smoke + contrato /ai/consult ✅
 - Tags:
   - stable/2026-01-22-smoke
