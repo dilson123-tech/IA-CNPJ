@@ -17,9 +17,20 @@ app.include_router(ai_router)
 
 @app.get("/health")
 def health():
+    # health não pode quebrar nunca (nem em reload)
+    auth_enabled = bool(getattr(settings, "AUTH_ENABLED", False))
+    docs_protected = auth_enabled and (
+        getattr(settings, "ENV", "dev") == "prod"
+        or bool(getattr(settings, "AUTH_PROTECT_DOCS", False))
+    )
+
     return {
         "ok": True,
         "service": "ia-cnpj",
-        "env": settings.ENV,
+        "env": getattr(settings, "ENV", "dev"),
         "version": "0.3.0",
+        "auth_enabled": auth_enabled,
+        "docs_protected": docs_protected,
     }
+
+
