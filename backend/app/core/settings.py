@@ -17,4 +17,8 @@ class Settings(BaseSettings):
     ENV: str = "lab"  # lab|prod
     DATABASE_URL: str = "sqlite:///./lab.db"
 
+    # Auth (JWT)
+    AUTH_ENABLED: bool = False
+    AUTH_PROTECT_DOCS: bool = False
+
 settings = Settings()

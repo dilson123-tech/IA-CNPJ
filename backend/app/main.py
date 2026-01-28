@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from app.core.settings import settings
 
+# 🚫 Failsafe: em PROD, auth não pode estar desligado
+if getattr(settings, "ENV", "dev") == "prod" and not bool(getattr(settings, "AUTH_ENABLED", False)):
+    raise RuntimeError("SECURITY: ENV=prod requer AUTH_ENABLED=true (failsafe)")
+
 from app.api.company import router as company_router
 from app.api.category import router as category_router
 from app.api.transaction import router as transaction_router
