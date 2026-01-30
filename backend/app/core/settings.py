@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, AliasChoices
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -14,13 +15,11 @@ class Settings(BaseSettings):
     OPENAI_TIMEOUT_S: int = 25
 
     APP_NAME: str = "IA-CNPJ API"
-    ENV: str = "lab"  # lab|prod
-    DATABASE_URL: str = "sqlite:///./lab.db"
-
+    ENV: str = Field(default="lab", validation_alias=AliasChoices("IA_CNPJ_ENV","ENV"))  # lab|prod
+    DATABASE_URL: str = Field(default="sqlite:///./lab.db", validation_alias=AliasChoices("IA_CNPJ_DATABASE_URL","DATABASE_URL"))
     # Auth (JWT)
-    AUTH_ENABLED: bool = False
-    AUTH_PROTECT_DOCS: bool = False
-
+    AUTH_ENABLED: bool = Field(default=False, validation_alias=AliasChoices("IA_CNPJ_AUTH_ENABLED","AUTH_ENABLED"))
+    AUTH_PROTECT_DOCS: bool = Field(default=False, validation_alias=AliasChoices("IA_CNPJ_AUTH_PROTECT_DOCS","AUTH_PROTECT_DOCS"))
     AUTH_USERNAME: str = ""
     # Prefira usar AUTH_PASSWORD_HASH em prod. AUTH_PASSWORD é fallback (lab/dev).
     AUTH_PASSWORD: str = ""
