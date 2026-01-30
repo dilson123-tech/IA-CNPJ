@@ -21,4 +21,11 @@ class Settings(BaseSettings):
     AUTH_ENABLED: bool = False
     AUTH_PROTECT_DOCS: bool = False
 
+    AUTH_USERNAME: str = ""
+    # Prefira usar AUTH_PASSWORD_HASH em prod. AUTH_PASSWORD é fallback (lab/dev).
+    AUTH_PASSWORD: str = ""
+    AUTH_PASSWORD_HASH: str = ""
+    AUTH_JWT_SECRET: str = ""
+    AUTH_JWT_TTL_MIN: int = 60
+
 settings = Settings()
