@@ -3,26 +3,18 @@ set -euo pipefail
 
 # === AUTH SMOKE AUTO-TOKEN ===
 CURL_AUTH=()
-curl_authed() {
+
+# wrap curl: usa 'command curl' e anexa Authorization quando CURL_AUTH estiver setado
+# 🔒 xtrace guard: se estiver em 'bash -x', desliga xtrace só durante o curl real (não vaza token)
+curl() {
   local _was_x=0
   [[ $- == *x* ]] && _was_x=1
   ((_was_x)) && set +x
-  curl_authed "$@"
-  local rc=$?
+  local rc=0
+  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
   ((_was_x)) && set -x
   return $rc
 }
-
-# wrap curl: anexa Authorization automaticamente quando CURL_AUTH estiver setado
-# 🔒 xtrace guard: hide bearer token (evita vazar em 'bash -x')
-if [[ $- == *x* ]] && [[ ${#CURL_AUTH[@]} -gt 0 ]]; then
-  set +x
-  rc=0
-  curl_authed "$@" || rc=$?
-  set -x
-  return $rc
-fi
-curl() { curl_authed "$@"; }
 
 BASE="${BASE:-http://127.0.0.1:8100}"
 
