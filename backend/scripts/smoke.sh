@@ -3,8 +3,18 @@ set -euo pipefail
 
 # === AUTH SMOKE AUTO-TOKEN ===
 CURL_AUTH=()
-# wrap curl: anexa Authorization automaticamente quando CURL_AUTH estiver setado
-curl() { command curl "${CURL_AUTH[@]}" "$@"; }
+
+# wrap curl: usa 'command curl' e anexa Authorization quando CURL_AUTH estiver setado
+# 🔒 xtrace guard: se estiver em 'bash -x', desliga xtrace só durante o curl real (não vaza token)
+curl() {
+  local _was_x=0
+  [[ $- == *x* ]] && _was_x=1
+  ((_was_x)) && set +x
+  local rc=0
+  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+  ((_was_x)) && set -x
+  return $rc
+}
 
 BASE="${BASE:-http://127.0.0.1:8100}"
 
@@ -34,6 +44,8 @@ if [[ "$_auth_enabled" == "true" ]]; then
       exit 1
     fi
 
+    _smoke_xtrace=0
+    if [[ $- == *x* ]]; then _smoke_xtrace=1; set +x; fi
     _resp="$(command curl -sS --max-time 5 "$_BASE/auth/login" \
       -H 'Content-Type: application/json' \
       -d "{\"username\":\"${_user}\",\"password\":\"${_pass}\"}")"
@@ -54,6 +66,7 @@ if [[ "$_auth_enabled" == "true" ]]; then
   fi
 
   CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+    if [[ $_smoke_xtrace -eq 1 ]]; then set -x; fi
   echo "[smoke] auth_enabled=true (token ok)"
 else
   echo "[smoke] auth_enabled=false"
