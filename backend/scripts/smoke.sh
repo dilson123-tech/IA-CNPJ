@@ -1,7 +1,63 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# === AUTH SMOKE AUTO-TOKEN ===
+CURL_AUTH=()
+# wrap curl: anexa Authorization automaticamente quando CURL_AUTH estiver setado
+curl() { command curl "${CURL_AUTH[@]}" "$@"; }
+
 BASE="${BASE:-http://127.0.0.1:8100}"
+
+# auto-token quando AUTH estiver ligado (via /health)
+_BASE="${BASE_URL:-${BASE:-http://127.0.0.1:8100}}"
+_health="$(command curl -sS --max-time 3 "$_BASE/health" 2>/dev/null || true)"
+
+if command -v jq >/dev/null 2>&1; then
+  _auth_enabled="$(printf '%s' "$_health" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
+  if [[ -z "${_auth_enabled:-}" ]]; then
+    _auth_enabled="$(printf '%s' "$_health" | sed -n 's/.*"auth_enabled"[[:space:]]*:[[:space:]]*\([^,}]*\).*/\1/p')"
+  fi
+else
+  _auth_enabled="$(printf '%s' "$_health" | sed -n 's/.*"auth_enabled"[[:space:]]*:[[:space:]]*\([^,}]*\).*/\1/p')"
+fi
+
+if [[ "$_auth_enabled" == "true" ]]; then
+  _user="${SMOKE_AUTH_USER:-${AUTH_USERNAME:-}}"
+  _pass="${SMOKE_AUTH_PASS:-${AUTH_PASSWORD:-${AUTH_PLAIN_PASSWORD:-}}}"
+
+  if [[ -n "${SMOKE_BEARER_TOKEN:-}" ]]; then
+    _tok="${SMOKE_BEARER_TOKEN}"
+  else
+    if [[ -z "$_user" || -z "$_pass" ]]; then
+      echo "❌ AUTH ativo, mas faltou credencial para smoke."
+      echo "   Use: SMOKE_AUTH_USER=admin SMOKE_AUTH_PASS='SENHA' ./scripts/smoke.sh"
+      exit 1
+    fi
+
+    _resp="$(command curl -sS --max-time 5 "$_BASE/auth/login" \
+      -H 'Content-Type: application/json' \
+      -d "{\"username\":\"${_user}\",\"password\":\"${_pass}\"}")"
+
+    if command -v jq >/dev/null 2>&1; then
+      _tok="$(printf '%s' "$_resp" | jq -er '.access_token // empty' 2>/dev/null || true)"
+    if [[ -z "${_tok:-}" ]]; then
+      _tok="$(printf '%s' "$_resp" | sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    fi
+    else
+      _tok="$(printf '%s' "$_resp" | sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    fi
+  fi
+
+  if [[ -z "${_tok:-}" || "${_tok:-}" == "null" ]]; then
+    echo "❌ falhou pegar access_token do /auth/login"
+    exit 1
+  fi
+
+  CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+  echo "[smoke] auth_enabled=true (token ok)"
+else
+  echo "[smoke] auth_enabled=false"
+fi
 
 # autodetect prefix (/api/v1) via OpenAPI (compat)
 API_PREFIX="${API_PREFIX:-}"
