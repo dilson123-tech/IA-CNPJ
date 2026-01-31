@@ -4,6 +4,17 @@ set -euo pipefail
 
 CURL_AUTH=()
 
+# bootstrap: guarantee curl_auth (CI roda com xtrace; wrapper desliga xtrace durante curl)
+type curl_auth >/dev/null 2>&1 || curl_auth() {
+  local rc=0
+  local was_xtrace=0
+  [[ $- == *x* ]] && was_xtrace=1 && set +x
+  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+  ((was_xtrace==1)) && set -x
+  return $rc
+}
+
+
 # AUTH_PREFLIGHT_V2 (auto)
 : "${BASE_API:=http://127.0.0.1:8100}"
 _auth_env="${IA_CNPJ_AUTH_ENABLED:-${AUTH_ENABLED:-}}"
