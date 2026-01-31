@@ -75,6 +75,36 @@ curl_auth() {
   return $rc
 }
 
+# AUTH_PREFLIGHT (auto)
+# se a API disser auth_enabled=true, faz login e seta header (sem vazar no xtrace)
+: "${BASE_API:=http://127.0.0.1:8100}"
+_health_json="$(curl_auth -sS "${BASE_API%/}/health" 2>/dev/null || true)"
+if command -v jq >/dev/null 2>&1; then
+  _auth_enabled="$(printf '%s' "$_health_json" | jq -r '.auth_enabled // false' 2>/dev/null || echo false)"
+else
+  _auth_enabled=false
+fi
+
+if [[ "${_auth_enabled}" == "true" ]]; then
+  _u="${SMOKE_AUTH_USER:-${IA_CNPJ_AUTH_USERNAME:-${AUTH_USERNAME:-admin}}}"
+  _p="${SMOKE_AUTH_PASS:-${IA_CNPJ_AUTH_PASSWORD:-${AUTH_PASSWORD:-}}}"
+  if [[ -z "${_p}" ]]; then
+    echo "❌ smoke auth: senha ausente (set SMOKE_AUTH_PASS ou IA_CNPJ_AUTH_PASSWORD/AUTH_PASSWORD)" >&2
+    exit 1
+  fi
+  _tok_json="$(curl_auth -sS -X POST "${BASE_API%/}/auth/login" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "username=${_u}" \
+    --data-urlencode "password=${_p}" )"
+  _tok="$(printf '%s' "$_tok_json" | jq -r '.access_token // empty' 2>/dev/null || echo '')"
+  if [[ -z "${_tok}" ]]; then
+    echo "❌ falhou pegar access_token (auth enabled)" >&2
+    exit 1
+  fi
+  CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+fi
+
+
 # --- curl_auth helper: retorna JSON completo, sem truncar, e valida com jq ---
 _curl_json() {
   local method="$1"; shift
