@@ -2,6 +2,17 @@
 set -euo pipefail
 
 
+CURL_AUTH=()
+CURL_AUTH_KEEP=()
+
+restore_auth() {
+  if [[ ${#CURL_AUTH_KEEP[@]} -eq 0 ]] && [[ ${#CURL_AUTH[@]} -gt 0 ]]; then
+    CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
+  fi
+  if [[ "${_auth_enabled:-}" == "true" ]] && [[ ${#CURL_AUTH[@]} -eq 0 ]] && [[ ${#CURL_AUTH_KEEP[@]} -gt 0 ]]; then
+    CURL_AUTH=("${CURL_AUTH_KEEP[@]}")
+  fi
+}
 # --- curl helper: retorna JSON completo, sem truncar, e valida com jq ---
 _curl_json() {
   local method="$1"; shift
@@ -150,6 +161,26 @@ echo "[0/5] garante company_id=$COMPANY_ID (seed idempotente)"
     COMP_PAYLOAD="$(jq -nc --arg cnpj "$SMOKE_CNPJ" --arg rs "$SMOKE_RAZAO" '{cnpj:$cnpj, razao_social:$rs}')"
 
     seed_tmp="/tmp/smoke_ai_seed_company.json"
+# auth: pega token (se auth_enabled=true)
+if [[ "${_auth_enabled:-false}" == "true" ]]; then
+  _user="${SMOKE_AUTH_USER:-}"
+  _pass="${SMOKE_AUTH_PASS:-}"
+  [[ -z "$_user" || -z "$_pass" ]] && die "SMOKE_AUTH_USER/SMOKE_AUTH_PASS obrigatórios quando auth_enabled=true"
+  _login_url="$BASE/auth/login"
+  _login_tmp="$(mktemp)"
+  _was_x=0; [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
+  (( _was_x )) && set +x
+  _code="$(curl -sS --max-time 6 -o "$_login_tmp" -w '%{http_code}' -X POST "$_login_url" \
+    -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$_user\",\"password\":\"$_pass\"}" || true)"
+  (( _was_x )) && set -x
+  [[ "$_code" != 2* ]] && { cat "$_login_tmp" >/dev/stderr || true; die "falhou pegar access_token do /auth/login"; }
+  _tok="$(jq -er '.access_token' "$_login_tmp" 2>/dev/null || true)"
+  rm -f "$_login_tmp"
+  [[ -z "$_tok" ]] && die "falhou extrair access_token do /auth/login"
+  CURL_AUTH=(-H "Authorization: Bearer $_tok")
+  restore_auth
+fi
     seed_url="$API/companies"
     seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
@@ -188,7 +219,17 @@ echo "[0/5] garante company_id=$COMPANY_ID (seed idempotente)"
 
 echo "[1/5] health"
 curl -sS --max-time 5 "$API/health" | jq . >/dev/null
-echo "OK"
+
+# auth_enabled (via /health)
+_auth_enabled=""
+_health_json="$(curl -sS --max-time 3 "$BASE/health" || true)"
+if command -v jq >/dev/null 2>&1; then
+  _auth_enabled="$(printf %s "$_health_json" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
+fi
+if [[ -z "${_auth_enabled:-}" ]]; then
+  _auth_enabled="$(printf %s "$_health_json" | sed -n 's/.*"auth_enabled"[[:space:]]*:[[:space:]]*\\([^,}]*\\).*/\\1/p')"
+fi
+[[ "${_auth_enabled:-}" == "true" ]] && _auth_enabled="true" || _auth_enabled="false"echo "OK"
 
 echo
 echo "[2/5] cria transação sem categoria (category_id=null)"
