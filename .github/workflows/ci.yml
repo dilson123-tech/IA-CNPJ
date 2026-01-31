@@ -63,4 +63,21 @@ jobs:
       - name: Smoke (make dev)
         env:
           DATABASE_URL: sqlite:////tmp/ia_cnpj_ci.db
-        run: make dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o xtrace
+          export SHELLOPTS
+
+          # sanity: bash filho herda xtrace via SHELLOPTS
+          bash -lc '[[ $- == *x* ]] && echo "xtrace inherited ✅"'
+
+          make dev |& tee /tmp/ci_smoke.log
+
+          # segurança: NÃO pode vazar header Authorization nem JWT (prefixo eyJhbGci)
+          if grep -nE 'Authorization: Bearer|eyJhbGci' /tmp/ci_smoke.log; then
+            echo "❌ SECURITY: token vazou no log sob xtrace"
+            exit 1
+          fi
+
+          echo "✅ OK: não vazou token sob xtrace"
