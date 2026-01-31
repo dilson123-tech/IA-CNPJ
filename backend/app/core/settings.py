@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     # Prefira usar AUTH_PASSWORD_HASH em prod. AUTH_PASSWORD é fallback (lab/dev).
     AUTH_PASSWORD: str = ""
     AUTH_PASSWORD_HASH: str = ""
-    AUTH_JWT_SECRET: str = ""
+    AUTH_JWT_SECRET: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_AUTH_JWT_SECRET","AUTH_JWT_SECRET","AUTH_SECRET","JWT_SECRET"))
+    AUTH_JWT_EXPIRE_MINUTES: int = Field(default=60, validation_alias=AliasChoices("IA_CNPJ_AUTH_JWT_EXPIRE_MINUTES","AUTH_JWT_EXPIRE_MINUTES","AUTH_TOKEN_EXPIRE_MINUTES"))
+    BUILD_SHA: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_BUILD_SHA","BUILD_SHA","GITHUB_SHA"))
     AUTH_JWT_TTL_MIN: int = 60
 
 settings = Settings()
