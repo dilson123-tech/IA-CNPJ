@@ -15,7 +15,7 @@ restore_auth() {
 }
 
 curl_auth() {
-  # roda curl com header global sem vazar em xtrace
+  # roda curl_auth com header global sem vazar em xtrace
   local _was_x=0
   [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
   (( _was_x )) && set +x
@@ -25,7 +25,7 @@ curl_auth() {
   return $rc
 }
 
-# --- curl helper: retorna JSON completo, sem truncar, e valida com jq ---
+# --- curl_auth helper: retorna JSON completo, sem truncar, e valida com jq ---
 _curl_json() {
   local method="$1"; shift
   local url="$1"; shift
@@ -36,12 +36,12 @@ _curl_json() {
   tmp_code="$(mktemp)"
 
   if [[ -n "$body" ]]; then
-    curl -sS --max-time 30 -X "$method" "$url" \
+    curl_auth -sS --max-time 30 -X "$method" "$url" \
       -H "Content-Type: application/json" \
       --data "$body" \
       -o "$tmp_body" -w '%{http_code}' > "$tmp_code"
   else
-    curl -sS --max-time 30 -X "$method" "$url" \
+    curl_auth -sS --max-time 30 -X "$method" "$url" \
       -o "$tmp_body" -w '%{http_code}' > "$tmp_code"
   fi
 
@@ -69,11 +69,50 @@ _curl_json() {
 API="${API_CNPJ:-http://127.0.0.1:8100}"
 API="$(printf '%s' "$API" | tr -d '\r')"
 BASE="$API"
+# AUTH_BOOTSTRAP_EARLY (auto)
+type die >/dev/null 2>&1 || die(){ echo "❌ $*"; exit 1; }
+
+# detecta auth_enabled via /health e faz login ANTES de qualquer /companies
+_auth_enabled=""
+_health_json="$(command curl -sS --max-time 3 "$BASE/health" || true)"
+if command -v jq >/dev/null 2>&1; then
+  _auth_enabled="$(printf %s "$_health_json" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
+fi
+if [[ -z "${_auth_enabled:-}" ]]; then
+  _auth_enabled="$(printf %s "$_health_json" | sed -n 's/.*"auth_enabled"[[:space:]]*:[[:space:]]*\([^,}]*\).*/\1/p')"
+fi
+[[ "${_auth_enabled:-}" == "true" ]] && _auth_enabled=true || _auth_enabled=false
+
+if [[ "${_auth_enabled}" == "true" ]] && [[ ${#CURL_AUTH[@]} -eq 0 ]]; then
+  _user="${SMOKE_AUTH_USER:-}"; _pass="${SMOKE_AUTH_PASS:-}"
+  [[ -z "$_user" || -z "$_pass" ]] && die "SMOKE_AUTH_USER/SMOKE_AUTH_PASS obrigatórios quando auth_enabled=true"
+  _login_url="$BASE/auth/login"
+  _tmp="$(mktemp)"
+  _was_x=0; [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
+  (( _was_x )) && set +x
+  _code="$(command curl -sS --max-time 6 -o "$_tmp" -w '%{http_code}' -X POST "$_login_url" \
+    -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$_user\",\"password\":\"$_pass\"}" || true)"
+  _tok=""
+  if command -v jq >/dev/null 2>&1; then
+    _tok="$(jq -er '.access_token' "$_tmp" 2>/dev/null || true)"
+  fi
+  if [[ -z "$_tok" ]]; then
+    _tok="$(sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_tmp" | head -n1)"
+  fi
+  rm -f "$_tmp"
+  [[ "${_code}" != 2* || -z "$_tok" ]] && die "falhou pegar access_token do /auth/login"
+  CURL_AUTH=(-H "Authorization: Bearer $_tok")
+  CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
+  restore_auth
+  (( _was_x )) && set -x
+fi
+
 
 # autodetect prefix (/api/v1) via OpenAPI (compat)
 API_PREFIX="${API_PREFIX:-}"
 if [ -z "$API_PREFIX" ]; then
-  oa="$(curl -sS --max-time 6 "$BASE/openapi.json" || true)"
+  oa="$(curl_auth -sS --max-time 6 "$BASE/openapi.json" || true)"
   if echo "$oa" | jq -e '.paths["/api/v1/ai/consult"]' >/dev/null 2>&1; then
     API_PREFIX="/api/v1"
   else
@@ -100,7 +139,7 @@ CLEANUP="${CLEANUP:-0}"
 die(){ echo "❌ $*" >&2; exit 1; }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "precisa de '$1' instalado"; }
-need curl
+need curl_auth
 need jq
 
 is_json() { jq -e . >/dev/null 2>&1; }
@@ -116,12 +155,12 @@ curl_json() {
   tmp_code="$(mktemp)"
 
   if [[ -n "$body" ]]; then
-    curl -sS --max-time 30 -X "$method" "$url" \
+    curl_auth -sS --max-time 30 -X "$method" "$url" \
       -H "Content-Type: application/json" \
       --data "$body" \
       -o "$tmp_body" -w '%{http_code}' > "$tmp_code"
   else
-    curl -sS --max-time 30 -X "$method" "$url" \
+    curl_auth -sS --max-time 30 -X "$method" "$url" \
       -o "$tmp_body" -w '%{http_code}' > "$tmp_code"
   fi
 
@@ -163,7 +202,7 @@ echo "[0/5] garante company_id=$COMPANY_ID (seed idempotente)"
 
   get_tmp="/tmp/smoke_ai_get_company.json"
   get_url="$API/companies/$COMPANY_ID"
-  get_code="$(curl -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$get_url" || echo "000")"
+  get_code="$(curl_auth -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$get_url" || echo "000")"
 
   if [[ "$get_code" =~ ^2[0-9][0-9]$ ]] && jq -e '.id' "$get_tmp" >/dev/null 2>&1; then
     echo "OK: company_id=$COMPANY_ID existe"
@@ -182,7 +221,7 @@ if [[ "${_auth_enabled:-false}" == "true" ]]; then
   _login_tmp="$(mktemp)"
   _was_x=0; [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
   (( _was_x )) && set +x
-  _code="$(curl -sS --max-time 6 -o "$_login_tmp" -w '%{http_code}' -X POST "$_login_url" \
+  _code="$(curl_auth -sS --max-time 6 -o "$_login_tmp" -w '%{http_code}' -X POST "$_login_url" \
     -H 'Content-Type: application/json' \
     -d "{\"username\":\"$_user\",\"password\":\"$_pass\"}" || true)"
   (( _was_x )) && set -x
@@ -195,14 +234,14 @@ if [[ "${_auth_enabled:-false}" == "true" ]]; then
   (( _was_x )) && set -x
 fi
     seed_url="$API/companies"
-    seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+    seed_code="$(curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
       -d "$COMP_PAYLOAD" || echo "000")"
 
     # fallback /api/v1/companies
     if [ "$seed_code" = "404" ]; then
       seed_url="$API/api/v1/companies"
-      seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+      seed_code="$(curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
         -H 'Content-Type: application/json' \
         -d "$COMP_PAYLOAD" || echo "000")"
     fi
@@ -211,10 +250,10 @@ fi
       echo "ℹ️ CNPJ já cadastrado; buscando id existente..."
       lookup_tmp="/tmp/smoke_ai_lookup_company.json"
       lookup_url="$seed_url"
-      lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+      lookup_code="$(curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
       if [ "$lookup_code" = "404" ]; then
         lookup_url="$API/api/v1/companies"
-        lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+        lookup_code="$(curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
       fi
       new_id="$(jq -r --arg c "$SMOKE_CNPJ" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
     elif [ "$seed_code" = "200" ] || [ "$seed_code" = "201" ]; then
@@ -231,11 +270,11 @@ fi
   fi
 
 echo "[1/5] health"
-curl -sS --max-time 5 "$API/health" | jq . >/dev/null
+curl_auth -sS --max-time 5 "$API/health" | jq . >/dev/null
 
 # auth_enabled (via /health)
 _auth_enabled=""
-_health_json="$(curl -sS --max-time 3 "$BASE/health" || true)"
+_health_json="$(curl_auth -sS --max-time 3 "$BASE/health" || true)"
 if command -v jq >/dev/null 2>&1; then
   _auth_enabled="$(printf %s "$_health_json" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
 fi
@@ -370,7 +409,7 @@ fi
 _BASE_APPLY_URL="${apply_url:-${APPLY_URL:-${API%/}/ai/suggest/apply}}"
 _IDEM_URL="${_BASE_APPLY_URL}?dry_run=true"
 
-_IDEM_RESP="$(curl -sS -X POST "${_IDEM_URL}" -H 'Content-Type: application/json' -d "${_IDEM_BODY}" || true)"
+_IDEM_RESP="$(curl_auth -sS -X POST "${_IDEM_URL}" -H 'Content-Type: application/json' -d "${_IDEM_BODY}" || true)"
 _IDEM_SUG="$(echo "${_IDEM_RESP}" | jq -r 'try (.suggested // .count // (.items|length) // (.suggestions|length) // 0) catch "__BADJSON__"')"
 
 if [[ "${_IDEM_SUG}" == "__BADJSON__" ]]; then
