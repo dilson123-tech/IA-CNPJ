@@ -20,10 +20,10 @@ class Settings(BaseSettings):
     # Auth (JWT)
     AUTH_ENABLED: bool = Field(default=False, validation_alias=AliasChoices("IA_CNPJ_AUTH_ENABLED","AUTH_ENABLED"))
     AUTH_PROTECT_DOCS: bool = Field(default=False, validation_alias=AliasChoices("IA_CNPJ_AUTH_PROTECT_DOCS","AUTH_PROTECT_DOCS"))
-    AUTH_USERNAME: str = ""
+    AUTH_USERNAME: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_AUTH_USERNAME","AUTH_USERNAME"))
     # Prefira usar AUTH_PASSWORD_HASH em prod. AUTH_PASSWORD é fallback (lab/dev).
-    AUTH_PASSWORD: str = ""
-    AUTH_PASSWORD_HASH: str = ""
+    AUTH_PASSWORD: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_AUTH_PASSWORD","AUTH_PASSWORD"))
+    AUTH_PASSWORD_HASH: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_AUTH_PASSWORD_HASH","AUTH_PASSWORD_HASH"))
     AUTH_JWT_SECRET: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_AUTH_JWT_SECRET","AUTH_JWT_SECRET","AUTH_SECRET","JWT_SECRET"))
     AUTH_JWT_EXPIRE_MINUTES: int = Field(default=60, validation_alias=AliasChoices("IA_CNPJ_AUTH_JWT_EXPIRE_MINUTES","AUTH_JWT_EXPIRE_MINUTES","AUTH_TOKEN_EXPIRE_MINUTES"))
     BUILD_SHA: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_BUILD_SHA","BUILD_SHA","GITHUB_SHA"))
@@ -38,6 +38,35 @@ class Settings(BaseSettings):
             raise ValueError("SECURITY: ENV=prod requer AUTH_ENABLED=true (failsafe)")
 
         if self.AUTH_ENABLED:
+
+            user = (self.AUTH_USERNAME or '').strip()
+
+            if not user:
+
+                raise ValueError('SECURITY: AUTH_USERNAME vazio (obrigatório quando AUTH_ENABLED=true)')
+
+            self.AUTH_USERNAME = user
+
+            ph = str(self.AUTH_PASSWORD_HASH or '').strip()
+
+            plain = str(self.AUTH_PASSWORD or '')
+
+            if not ph and not plain:
+
+                raise ValueError('SECURITY: AUTH_PASSWORD ou AUTH_PASSWORD_HASH obrigatório quando AUTH_ENABLED=true')
+
+            if ph:
+
+                try:
+
+                    import passlib  # noqa: F401
+
+                except Exception:
+
+                    raise ValueError('SECURITY: AUTH_PASSWORD_HASH definido mas passlib não está disponível')
+
+            self.AUTH_PASSWORD_HASH = ph
+
             sec = (self.AUTH_JWT_SECRET or "").strip()
             if not sec:
                 raise ValueError("SECURITY: AUTH_JWT_SECRET vazio (obrigatório quando AUTH_ENABLED=true)")

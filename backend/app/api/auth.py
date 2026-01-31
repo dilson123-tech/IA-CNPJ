@@ -41,11 +41,7 @@ def _verify_password(pw: str) -> bool:
 def login(payload: LoginIn):
     if not bool(getattr(settings, "AUTH_ENABLED", False)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Auth disabled")
-
     user = str(getattr(settings, "AUTH_USERNAME", "") or "").strip()
-    if not user:
-        raise RuntimeError("SECURITY: AUTH_USERNAME obrigatório quando AUTH_ENABLED=true")
-
     if not secrets.compare_digest(payload.username.strip(), user):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 

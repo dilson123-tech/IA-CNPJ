@@ -3,7 +3,17 @@ set -euo pipefail
 
 # === AUTH SMOKE AUTO-TOKEN ===
 CURL_AUTH=()
+CURL_AUTH_KEEP=()
 
+restore_auth() {
+  # guarda o primeiro header válido e restaura se alguém zerar CURL_AUTH
+  if [[ ${#CURL_AUTH_KEEP[@]} -eq 0 ]] && [[ ${#CURL_AUTH[@]} -gt 0 ]]; then
+    CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
+  fi
+  if [[ "${_auth_enabled:-}" == "true" ]] && [[ ${#CURL_AUTH[@]} -eq 0 ]] && [[ ${#CURL_AUTH_KEEP[@]} -gt 0 ]]; then
+    CURL_AUTH=("${CURL_AUTH_KEEP[@]}")
+  fi
+}
 # wrap curl: usa 'command curl' e anexa Authorization quando CURL_AUTH estiver setado
 # 🔒 xtrace guard: se estiver em 'bash -x', desliga xtrace só durante o curl real (não vaza token)
 curl() {
@@ -101,6 +111,7 @@ fail() { echo "❌ $*"; exit 1; }
 # - valida HTTP 2xx
 # - valida JSON (jq)
 req_json() {
+  restore_auth
   local timeout="$1"; local method="$2"; local url="$3"; local out="$4"; shift 4
   local code
   code="$(curl -sS --max-time "$timeout" -o "$out" -w '%{http_code}' -X "$method" "$url" "$@" || echo "000")"
