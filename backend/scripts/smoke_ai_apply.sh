@@ -7,12 +7,24 @@ CURL_AUTH_KEEP=()
 
 restore_auth() {
   if [[ ${#CURL_AUTH_KEEP[@]} -eq 0 ]] && [[ ${#CURL_AUTH[@]} -gt 0 ]]; then
-    CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
+    CURL_AUTH_KEEP=()
   fi
   if [[ "${_auth_enabled:-}" == "true" ]] && [[ ${#CURL_AUTH[@]} -eq 0 ]] && [[ ${#CURL_AUTH_KEEP[@]} -gt 0 ]]; then
     CURL_AUTH=("${CURL_AUTH_KEEP[@]}")
   fi
 }
+
+curl_auth() {
+  # roda curl com header global sem vazar em xtrace
+  local _was_x=0
+  [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
+  (( _was_x )) && set +x
+  command curl "$@"
+  local rc=$?
+  # xtrace será restaurado após setar CURL_AUTH
+  return $rc
+}
+
 # --- curl helper: retorna JSON completo, sem truncar, e valida com jq ---
 _curl_json() {
   local method="$1"; shift
@@ -180,6 +192,7 @@ if [[ "${_auth_enabled:-false}" == "true" ]]; then
   [[ -z "$_tok" ]] && die "falhou extrair access_token do /auth/login"
   CURL_AUTH=(-H "Authorization: Bearer $_tok")
   restore_auth
+  (( _was_x )) && set -x
 fi
     seed_url="$API/companies"
     seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
