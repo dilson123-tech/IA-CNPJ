@@ -3,6 +3,40 @@ set -euo pipefail
 
 
 CURL_AUTH=()
+
+# AUTH_PREFLIGHT_V2 (auto)
+: "${BASE_API:=http://127.0.0.1:8100}"
+_auth_env="${IA_CNPJ_AUTH_ENABLED:-${AUTH_ENABLED:-}}"
+if [[ "${_auth_env}" == "true" ]]; then
+  _u="${SMOKE_AUTH_USER:-${IA_CNPJ_AUTH_USERNAME:-${AUTH_USERNAME:-admin}}}"
+  _p="${SMOKE_AUTH_PASS:-${IA_CNPJ_AUTH_PASSWORD:-${AUTH_PASSWORD:-}}}"
+  if [[ -z "${_p}" ]]; then
+    echo "❌ smoke auth: senha ausente (set SMOKE_AUTH_PASS ou IA_CNPJ_AUTH_PASSWORD/AUTH_PASSWORD)" >&2
+    exit 1
+  fi
+  # xtrace OFF: não vazar user/pass/token
+  _x=0; [[ $- == *x* ]] && _x=1 && set +x
+  _tok_json="$(curl_auth -sS -X POST "${BASE_API%/}/auth/login" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "username=${_u}" \
+    --data-urlencode "password=${_p}" )"
+  if command -v jq >/dev/null 2>&1; then
+    _tok="$(printf '%s' "$_tok_json" | jq -r '.access_token // empty' 2>/dev/null || true)"
+  else
+    _tok=""
+  fi
+  if [[ -z "${_tok}" ]]; then
+    (( _x )) && set -x
+    echo "❌ falhou pegar access_token (auth enabled)" >&2
+    exit 1
+  fi
+  CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+  (( _x )) && set -x
+  echo "ℹ️ auth preflight: token carregado ✅"
+else
+  echo "ℹ️ auth preflight: auth desligado (IA_CNPJ_AUTH_ENABLED != true)"
+fi
+
 CURL_AUTH_KEEP=()
 
 restore_auth() {
@@ -74,6 +108,8 @@ curl_auth() {
   # xtrace será restaurado após setar CURL_AUTH
   return $rc
 }
+
+curl() { curl_auth "$@"; }
 
 # AUTH_PREFLIGHT (auto)
 # se a API disser auth_enabled=true, faz login e seta header (sem vazar no xtrace)
