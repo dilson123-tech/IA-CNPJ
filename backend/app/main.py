@@ -15,6 +15,9 @@ from app.api.ai import router as ai_router
 
 
 # 🚫 Failsafe: em PROD, auth não pode estar desligado
+if bool(getattr(settings, "AUTH_PROTECT_DOCS", False)) and not bool(getattr(settings, "AUTH_ENABLED", False)):
+    raise RuntimeError("SECURITY: AUTH_PROTECT_DOCS requer AUTH_ENABLED=true")
+
 if getattr(settings, "ENV", "lab") == "prod" and not bool(getattr(settings, "AUTH_ENABLED", False)):
     raise RuntimeError("SECURITY: ENV=prod requer AUTH_ENABLED=true (failsafe)")
 
@@ -52,6 +55,8 @@ def health():
         "env": settings.ENV,
         "version": "0.3.0",
         "auth_enabled": bool(getattr(settings, "AUTH_ENABLED", False)),
+        "auth_protect_docs": bool(getattr(settings, "AUTH_PROTECT_DOCS", False)),
+        "build_sha": getattr(settings, "BUILD_SHA", ""),
         "docs_protected": bool(DOCS_PROTECTED),
     }
 

@@ -22,6 +22,8 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def _secret() -> str:
     sec = getattr(settings, "AUTH_JWT_SECRET", "") or ""
+    if bool(getattr(settings, "AUTH_ENABLED", False)) and len(sec) < 32:
+        raise RuntimeError("SECURITY: AUTH_JWT_SECRET fraco (min 32 chars) quando AUTH_ENABLED=true")
     if not sec:
         raise RuntimeError("SECURITY: AUTH_JWT_SECRET vazio (obrigatório quando AUTH_ENABLED=true)")
     return sec
