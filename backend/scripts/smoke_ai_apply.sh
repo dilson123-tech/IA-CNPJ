@@ -15,6 +15,56 @@ restore_auth() {
 }
 
 curl_auth() {
+  # AUTO_LOGIN_ON_DEMAND: se auth está ligado e não temos token, faz login antes do request
+  if [[ ${#CURL_AUTH[@]} -eq 0 ]]; then
+    local _enabled="${IA_CNPJ_AUTH_ENABLED:-${AUTH_ENABLED:-}}"
+    if [[ "${_enabled}" == "true" || "${_enabled}" == "1" ]]; then
+      local _user="${SMOKE_AUTH_USER:-}" _pass="${SMOKE_AUTH_PASS:-}"
+      if [[ -z "${_user}" || -z "${_pass}" ]]; then
+        echo "❌ SMOKE_AUTH_USER/SMOKE_AUTH_PASS obrigatórios quando auth está ligado" >&2
+        exit 1
+      fi
+
+      local _login_url="${BASE%/}/auth/login"
+      local _tmp _code _tok _i
+      local _was_x=0
+      [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
+      (( _was_x )) && set +x
+
+      for _i in {1..25}; do
+        _tmp="$(mktemp)"
+        _code="$(command curl -sS --max-time 6 -o "${_tmp}" -w '%{http_code}' \
+          -X POST "${_login_url}" \
+          -H 'Content-Type: application/json' \
+          -d "{\"username\":\"${_user}\",\"password\":\"${_pass}\"}" || true
+        )"
+
+        _tok=""
+        if command -v jq >/dev/null 2>&1; then
+          _tok="$(jq -er '.access_token' "${_tmp}" 2>/dev/null || true)"
+        fi
+        if [[ -z "${_tok}" ]]; then
+          _tok="$(sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${_tmp}" | head -n1)"
+        fi
+        rm -f "${_tmp}"
+
+        if [[ "${_code}" == 2* && -n "${_tok}" ]]; then
+          CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+          CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
+          break
+        fi
+        sleep 0.2
+      done
+
+      (( _was_x )) && set -x
+
+      if [[ ${#CURL_AUTH[@]} -eq 0 ]]; then
+        echo "❌ falhou pegar access_token do /auth/login (auto-login do curl_auth)" >&2
+        exit 1
+      fi
+    fi
+  fi
+
   # roda curl_auth com header global sem vazar em xtrace
   local _was_x=0
   [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
@@ -74,7 +124,7 @@ type die >/dev/null 2>&1 || die(){ echo "❌ $*"; exit 1; }
 
 # detecta auth_enabled via /health e faz login ANTES de qualquer /companies
 _auth_enabled=""
-_health_json="$(command curl -sS --max-time 3 "$BASE/health" || true)"
+_health_json="$(curl_auth -sS --max-time 3 "$BASE/health" || true)"
 if command -v jq >/dev/null 2>&1; then
   _auth_enabled="$(printf %s "$_health_json" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
 fi
@@ -90,7 +140,7 @@ if [[ "${_auth_enabled}" == "true" ]] && [[ ${#CURL_AUTH[@]} -eq 0 ]]; then
   _tmp="$(mktemp)"
   _was_x=0; [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
   (( _was_x )) && set +x
-  _code="$(command curl -sS --max-time 6 -o "$_tmp" -w '%{http_code}' -X POST "$_login_url" \
+  _code="$(curl_auth -sS --max-time 6 -o "$_tmp" -w '%{http_code}' -X POST "$_login_url" \
     -H 'Content-Type: application/json' \
     -d "{\"username\":\"$_user\",\"password\":\"$_pass\"}" || true)"
   _tok=""
