@@ -41,7 +41,13 @@ if [[ "${_auth_env}" == "true" ]]; then
     echo "❌ falhou pegar access_token (auth enabled)" >&2
     exit 1
   fi
-  CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+  __x=0
+  [[ $- == *x* ]] && __x=1 && set +x
+  __hdr=/tmp/ia_cnpj_auth_header
+  printf 'Authorization: Bearer %s' "${_tok}" > "$__hdr"
+  CURL_AUTH=(-H "@$__hdr")
+  ((__x==1)) && set -x
+
   (( _x )) && set -x
   echo "ℹ️ auth preflight: token carregado ✅"
 else
@@ -94,7 +100,13 @@ curl_auth() {
         rm -f "${_tmp}"
 
         if [[ "${_code}" == 2* && -n "${_tok}" ]]; then
-          CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+          __x=0
+          [[ $- == *x* ]] && __x=1 && set +x
+          __hdr=/tmp/ia_cnpj_auth_header
+          printf 'Authorization: Bearer %s' "${_tok}" > "$__hdr"
+          CURL_AUTH=(-H "@$__hdr")
+          ((__x==1)) && set -x
+
           CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
           break
         fi
@@ -148,7 +160,13 @@ if [[ "${_auth_enabled}" == "true" ]]; then
     echo "❌ falhou pegar access_token (auth enabled)" >&2
     exit 1
   fi
-  CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+  __x=0
+  [[ $- == *x* ]] && __x=1 && set +x
+  __hdr=/tmp/ia_cnpj_auth_header
+  printf 'Authorization: Bearer %s' "${_tok}" > "$__hdr"
+  CURL_AUTH=(-H "@$__hdr")
+  ((__x==1)) && set -x
+
 fi
 
 
@@ -229,7 +247,13 @@ if [[ "${_auth_enabled}" == "true" ]] && [[ ${#CURL_AUTH[@]} -eq 0 ]]; then
   fi
   rm -f "$_tmp"
   [[ "${_code}" != 2* || -z "$_tok" ]] && die "falhou pegar access_token do /auth/login"
-  CURL_AUTH=(-H "Authorization: Bearer $_tok")
+  __x=0
+  [[ $- == *x* ]] && __x=1 && set +x
+  __hdr=/tmp/ia_cnpj_auth_header
+  printf 'Authorization: Bearer %s' "$_tok" > "$__hdr"
+  CURL_AUTH=(-H "@$__hdr")
+  ((__x==1)) && set -x
+
   CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
   restore_auth
   (( _was_x )) && set -x
@@ -356,7 +380,13 @@ if [[ "${_auth_enabled:-false}" == "true" ]]; then
   _tok="$(jq -er '.access_token' "$_login_tmp" 2>/dev/null || true)"
   rm -f "$_login_tmp"
   [[ -z "$_tok" ]] && die "falhou extrair access_token do /auth/login"
-  CURL_AUTH=(-H "Authorization: Bearer $_tok")
+  __x=0
+  [[ $- == *x* ]] && __x=1 && set +x
+  __hdr=/tmp/ia_cnpj_auth_header
+  printf 'Authorization: Bearer %s' "$_tok" > "$__hdr"
+  CURL_AUTH=(-H "@$__hdr")
+  ((__x==1)) && set -x
+
   restore_auth
   (( _was_x )) && set -x
 fi

@@ -75,7 +75,18 @@ if [[ "$_auth_enabled" == "true" ]]; then
     exit 1
   fi
 
-  CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+  __x=0
+
+  [[ $- == *x* ]] && __x=1 && set +x
+
+  __hdr=/tmp/ia_cnpj_auth_header
+
+  printf 'Authorization: Bearer %s' "${_tok}" > "$__hdr"
+
+  CURL_AUTH=(-H "@$__hdr")
+
+  ((__x==1)) && set -x
+
     if [[ $_smoke_xtrace -eq 1 ]]; then set -x; fi
   echo "[smoke] auth_enabled=true (token ok)"
 else
