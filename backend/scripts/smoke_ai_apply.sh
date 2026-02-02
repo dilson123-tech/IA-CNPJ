@@ -9,7 +9,7 @@ type curl_auth >/dev/null 2>&1 || curl_auth() {
   local rc=0
   local was_xtrace=0
   [[ $- == *x* ]] && was_xtrace=1 && set +x
-  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+  curl_auth "${CURL_AUTH[@]}" "$@" || rc=$?
   ((was_xtrace==1)) && set -x
   return $rc
 }

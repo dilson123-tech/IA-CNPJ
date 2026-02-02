@@ -21,7 +21,7 @@ curl() {
   [[ $- == *x* ]] && _was_x=1
   ((_was_x)) && set +x
   local rc=0
-  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+  curl_auth "${CURL_AUTH[@]}" "$@" || rc=$?
   ((_was_x)) && set -x
   return $rc
 }
@@ -30,7 +30,7 @@ BASE="${BASE:-http://127.0.0.1:8100}"
 
 # auto-token quando AUTH estiver ligado (via /health)
 _BASE="${BASE_URL:-${BASE:-http://127.0.0.1:8100}}"
-_health="$(command curl -sS --max-time 3 "$_BASE/health" 2>/dev/null || true)"
+_health="$(curl_auth -sS --max-time 3 "$_BASE/health" 2>/dev/null || true)"
 
 if command -v jq >/dev/null 2>&1; then
   _auth_enabled="$(printf '%s' "$_health" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
@@ -56,7 +56,7 @@ if [[ "$_auth_enabled" == "true" ]]; then
 
     _smoke_xtrace=0
     if [[ $- == *x* ]]; then _smoke_xtrace=1; set +x; fi
-    _resp="$(command curl -sS --max-time 5 "$_BASE/auth/login" \
+    _resp="$(curl_auth -sS --max-time 5 "$_BASE/auth/login" \
       -H 'Content-Type: application/json' \
       -d "{\"username\":\"${_user}\",\"password\":\"${_pass}\"}")"
 
