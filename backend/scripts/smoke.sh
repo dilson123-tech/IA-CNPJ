@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+curl_auth() {
+  local rc=0 _was_x=0
+  [[ $- == *x* ]] && _was_x=1
+  set +x
+  if ((${#CURL_AUTH[@]})); then
+    command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+  else
+    command curl "$@" || rc=$?
+  fi
+  (( _was_x )) && set -x
+  return $rc
+}
+
 set -euo pipefail
 
 # === AUTH SMOKE AUTO-TOKEN ===
