@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# compat: IA_CNPJ_AUTH_ENABLED (legado) deve seguir AUTH_ENABLED
+: "${IA_CNPJ_AUTH_ENABLED:=${AUTH_ENABLED:-false}}"
+if [[ "${IA_CNPJ_AUTH_ENABLED}" == "1" ]]; then IA_CNPJ_AUTH_ENABLED=true; fi
+export IA_CNPJ_AUTH_ENABLED
+
+
 
 CURL_AUTH=()
 
