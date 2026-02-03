@@ -22,7 +22,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DB_PATH="${DB_PATH:-$ROOT/backend/app.db}"
 
 
-# --- CI/SMOKE: garante 1 SQLite absoluto (alembic + uvicorn) ---
+# --- CI/SMOKE: garante 1 SQLite absoluto (alembic + uvicorn) --- --loop asyncio --http h11
 if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
   ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   BACKEND_DIR="${ROOT_DIR}/backend"
