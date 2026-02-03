@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# === CI bootstrap: curl_auth SEMPRE existe antes de usar (e não vaza token sob xtrace) ===
+declare -a CURL_AUTH=()
+curl_auth() {
+  local rc=0 _was_x=0
+  [[ $- == *x* ]] && _was_x=1
+  (( _was_x )) && set +x
+  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+  (( _was_x )) && set -x
+  return $rc
+}
+# força TODAS as chamadas 'curl' passarem pelo wrapper (exceto quando usar 'command curl')
+curl() { curl_auth "$@"; }
+
+
 # compat: IA_CNPJ_AUTH_ENABLED (legado) deve seguir AUTH_ENABLED
 : "${IA_CNPJ_AUTH_ENABLED:=${AUTH_ENABLED:-false}}"
 if [[ "${IA_CNPJ_AUTH_ENABLED}" == "1" ]]; then IA_CNPJ_AUTH_ENABLED=true; fi
