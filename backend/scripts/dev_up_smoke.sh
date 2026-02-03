@@ -110,9 +110,9 @@ echo "[1/4] alembic upgrade head"
 alembic upgrade head
 
 LOG="/tmp/ia-cnpj_uvicorn_${PORT}.log"
-env DATABASE_URL="${DATABASE_URL:-}" echo "[2/4] subindo uvicorn em ${BIND_HOST}:${PORT} (bg) | log: ${LOG}" --loop asyncio --http h11
-echo "�� DATABASE_URL=${DATABASE_URL:-<empty>}"
-uvicorn "$UVICORN_APP" --host "$BIND_HOST" --port "$PORT" --log-level info >"$LOG" 2>&1 &
+  echo "[2/4] subindo uvicorn em ${BIND_HOST}:${PORT} (bg) | log: ${LOG}"
+  echo "[db] DATABASE_URL=${DATABASE_URL:-<empty>}"
+PYTHONFAULTHANDLER=1 uvicorn "$UVICORN_APP" --host "$BIND_HOST" --port "$PORT" --loop asyncio --http h11 --log-level info >"$LOG" 2>&1 &
 UV_PID=$!
 
 cleanup() {
