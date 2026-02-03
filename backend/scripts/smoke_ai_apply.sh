@@ -161,7 +161,6 @@ curl_auth() {
   return $rc
 }
 
-curl_auth() { curl_auth "$@"; }
 
 # AUTH_PREFLIGHT (auto)
 # se a API disser auth_enabled=true, faz login e seta header (sem vazar no xtrace)
