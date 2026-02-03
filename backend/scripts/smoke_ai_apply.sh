@@ -18,6 +18,15 @@ type curl_auth >/dev/null 2>&1 || curl_auth() {
 # AUTH_PREFLIGHT_V2 (auto)
 : "${BASE_API:=http://127.0.0.1:8100}"
 _auth_env="${IA_CNPJ_AUTH_ENABLED:-${AUTH_ENABLED:-}}"
+
+# CI/PR: se _auth_env pedir token mas BEARER_TOKEN não veio, cai pra login (evita exit 139)
+if [[ "${_auth_env:-false}" == "true" && -z "${BEARER_TOKEN:-}" ]]; then
+  echo "ℹ️  auth_env=true mas BEARER_TOKEN vazio -> fallback pra login" >&2
+  _auth_env="false"  # fallback pra login
+fi
+
+# segurança: se xtrace veio herdado, desliga antes de tocar em user/pass/token (não vaza no log)
+if [[ $- == *x* ]]; then set +x; fi
 if [[ "${_auth_env}" == "true" ]]; then
   _u="${SMOKE_AUTH_USER:-${IA_CNPJ_AUTH_USERNAME:-${AUTH_USERNAME:-admin}}}"
   _p="${SMOKE_AUTH_PASS:-${IA_CNPJ_AUTH_PASSWORD:-${AUTH_PASSWORD:-}}}"
