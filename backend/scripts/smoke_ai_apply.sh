@@ -10,7 +10,7 @@ export IA_CNPJ_AUTH_ENABLED
 
 CURL_AUTH=()
 
-# bootstrap: guarantee curl_auth (CI roda com xtrace; wrapper desliga xtrace durante curl)
+# bootstrap: guarantee curl_auth (CI roda com xtrace; wrapper desliga xtrace durante curl_auth)
 type curl_auth >/dev/null 2>&1 || curl_auth() {
   local rc=0
   local was_xtrace=0
@@ -141,13 +141,13 @@ curl_auth() {
   local _was_x=0
   [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
   (( _was_x )) && set +x
-  command curl "$@"
+  command curl "${CURL_AUTH[@]}" "$@"
   local rc=$?
   # xtrace será restaurado após setar CURL_AUTH
   return $rc
 }
 
-curl() { curl_auth "$@"; }
+curl_auth() { curl_auth "$@"; }
 
 # AUTH_PREFLIGHT (auto)
 # se a API disser auth_enabled=true, faz login e seta header (sem vazar no xtrace)

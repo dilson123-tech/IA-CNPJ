@@ -6,7 +6,7 @@ curl_auth() {
   if ((${#CURL_AUTH[@]})); then
     command curl "${CURL_AUTH[@]}" "$@" || rc=$?
   else
-    command curl "$@" || rc=$?
+    command curl "${CURL_AUTH[@]}" "$@" || rc=$?
   fi
   (( _was_x )) && set -x
   return $rc
@@ -27,9 +27,9 @@ restore_auth() {
     CURL_AUTH=("${CURL_AUTH_KEEP[@]}")
   fi
 }
-# wrap curl: usa 'command curl' e anexa Authorization quando CURL_AUTH estiver setado
-# 🔒 xtrace guard: se estiver em 'bash -x', desliga xtrace só durante o curl real (não vaza token)
-curl() {
+# wrap curl_auth: usa 'command curl' e anexa Authorization quando CURL_AUTH estiver setado
+# 🔒 xtrace guard: se estiver em 'bash -x', desliga xtrace só durante o curl_auth real (não vaza token)
+curl_auth() {
   local _was_x=0
   [[ $- == *x* ]] && _was_x=1
   ((_was_x)) && set +x
@@ -109,7 +109,7 @@ fi
 # autodetect prefix (/api/v1) via OpenAPI (compat)
 API_PREFIX="${API_PREFIX:-}"
 if [ -z "$API_PREFIX" ]; then
-  oa="$(curl -sS --max-time 6 "$BASE/openapi.json" || true)"
+  oa="$(curl_auth -sS --max-time 6 "$BASE/openapi.json" || true)"
   if echo "$oa" | jq -e '.paths["/api/v1/ai/consult"]' >/dev/null 2>&1; then
     API_PREFIX="/api/v1"
   else
@@ -138,7 +138,7 @@ req_json() {
   restore_auth
   local timeout="$1"; local method="$2"; local url="$3"; local out="$4"; shift 4
   local code
-  code="$(curl -sS --max-time "$timeout" -o "$out" -w '%{http_code}' -X "$method" "$url" "$@" || echo "000")"
+  code="$(curl_auth -sS --max-time "$timeout" -o "$out" -w '%{http_code}' -X "$method" "$url" "$@" || echo "000")"
 
   if [[ ! "$code" =~ ^2[0-9][0-9]$ ]]; then
     echo "❌ HTTP $code $method $url"
@@ -168,7 +168,7 @@ ensure_company() {
   fi
 
   get_tmp="/tmp/smoke_pre_company_get.json"
-  get_code="$(curl -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$BASE/companies/$COMPANY_ID" || echo "000")"
+  get_code="$(curl_auth -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$BASE/companies/$COMPANY_ID" || echo "000")"
 
   if [[ "$get_code" =~ ^2[0-9][0-9]$ ]]; then
     # existe
@@ -181,13 +181,13 @@ ensure_company() {
 
   seed_tmp="/tmp/smoke_pre_seed_company.json"
   seed_url="$BASE/companies"
-  seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+  seed_code="$(curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
     -H 'Content-Type: application/json' \
     -d "$payload" || echo "000")"
 
   if [ "$seed_code" = "404" ]; then
     seed_url="$BASE/api/v1/companies"
-    seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+    seed_code="$(curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
       -d "$payload" || echo "000")"
   fi
@@ -202,10 +202,10 @@ ensure_company() {
     echo "ℹ️ preflight: 409 (CNPJ já cadastrado); buscando id existente..."
     lookup_tmp="/tmp/smoke_pre_lookup_companies.json"
     lookup_url="$seed_url"
-    lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+    lookup_code="$(curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
     if [ "$lookup_code" = "404" ]; then
       lookup_url="$BASE/api/v1/companies"
-      lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+      lookup_code="$(curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
     fi
     existing_id="$(jq -r --arg c "$SMOKE_CNPJ" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
     if [ -z "$existing_id" ] || [ "$existing_id" = "null" ]; then
@@ -314,7 +314,7 @@ tmp="/tmp/ai_consult_contract.json"
 
 call_consult () {
   local url="$1"
-  curl -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$url" \
+  curl_auth -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$url" \
     -H 'Content-Type: application/json' \
     -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":20,\"question\":\"onde estou gastando mais?\"}"
 }
@@ -334,14 +334,14 @@ if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp
 
   seed_tmp="/tmp/ai_consult_seed_company.json"
   seed_url="$BASE/companies"
-  seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+  seed_code="$(curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
     -H 'Content-Type: application/json' \
     -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}')"
 
   # fallback pra /api/v1/companies se necessário
   if [ "$seed_code" = "404" ]; then
     seed_url="$BASE/api/v1/companies"
-    seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+    seed_code="$(curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
       -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}')"
   fi
@@ -354,10 +354,10 @@ if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp
     echo "ℹ️ seed retornou 409 (CNPJ já cadastrado); buscando id existente..."
     lookup_tmp="/tmp/ai_consult_lookup_company.json"
     lookup_url="$seed_url"
-    lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url")"
+    lookup_code="$(curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url")"
     if [ "$lookup_code" = "404" ]; then
       lookup_url="$BASE/api/v1/companies"
-      lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url")"
+      lookup_code="$(curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url")"
     fi
     existing_id="$(jq -r --arg c "12345678000195" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
     if [ -z "$existing_id" ] || [ "$existing_id" = "null" ]; then
@@ -409,7 +409,7 @@ jq -e '
 echo "OK"
 
 
-curl -sS --max-time 6 -H 'Content-Type: application/json' \
+curl_auth -sS --max-time 6 -H 'Content-Type: application/json' \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":10,\"question\":\"smoke\"}" \
   "$BASE_API/ai/consult" | jq -e . >/dev/null
 echo "OK"
