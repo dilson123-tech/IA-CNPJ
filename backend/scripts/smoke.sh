@@ -121,7 +121,8 @@ fi
 # autodetect prefix (/api/v1) via OpenAPI (compat)
 API_PREFIX="${API_PREFIX:-}"
 if [ -z "$API_PREFIX" ]; then
-  oa="$(curl_auth -sS --max-time 6 "$BASE/openapi.json" || true)"
+oa_file="${TMPDIR:-/tmp}/ia-cnpj_openapi_$$.json"
+curl_auth -sS --connect-timeout 1 --max-time 15 "$_BASE/openapi.json" >"$oa_file"
   if echo "$oa" | jq -e '.paths["/api/v1/ai/consult"]' >/dev/null 2>&1; then
     API_PREFIX="/api/v1"
   else
