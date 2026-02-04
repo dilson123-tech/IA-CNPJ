@@ -4,13 +4,48 @@ set -euo pipefail
 # === CI bootstrap: curl_auth SEMPRE existe antes de usar (e não vaza token sob xtrace) ===
 declare -a CURL_AUTH=()
 curl_auth() {
-  local rc=0 _was_x=0
-  [[ $- == *x* ]] && _was_x=1
-  (( _was_x )) && set +x
+  local rc=0
+  local _was_x=0
+  case "$-" in *x*) _was_x=1; set +x ;; esac
+
   command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+
+  # workaround hard: curl segfault (rc=139) em runner -> fallback python para GET simples
+  if (( rc == 139 )); then
+    local has_body=0 has_method=0 a
+    for a in "$@"; do
+      case "$a" in
+        -d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form) has_body=1 ;;
+        -X|--request) has_method=1 ;;
+      esac
+    done
+    if (( has_body==0 && has_method==0 )); then
+      local url="${@: -1}"
+      rc=0
+      python - "$url" <<'PYF'
+import sys, urllib.request
+url = sys.argv[1]
+req = urllib.request.Request(url, method="GET")
+try:
+    with urllib.request.urlopen(req, timeout=15) as r:
+        sys.stdout.buffer.write(r.read())
+except Exception as e:
+    sys.stderr.write(f"[curl_auth py fallback] error: {e}\n")
+    sys.exit(7)
+PYF
+      rc=$?
+    fi
+  fi
+
+  if (( rc != 0 )); then
+    local url="${@: -1}"
+    echo "[curl_auth] rc=$rc url=$url" >&2
+  fi
+
   (( _was_x )) && set -x
   return $rc
 }
+
 # força TODAS as chamadas 'curl' passarem pelo wrapper (exceto quando usar 'command curl')
 curl() { curl_auth "$@"; }
 
