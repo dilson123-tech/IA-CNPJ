@@ -50,7 +50,13 @@ BASE="${BASE:-http://127.0.0.1:8100}"
 
 # auto-token quando AUTH estiver ligado (via /health)
 _BASE="${BASE_URL:-${BASE:-http://127.0.0.1:8100}}"
-_health="$(curl_auth -fsS --connect-timeout 1 --max-time 10 --retry 6 --retry-all-errors --retry-delay 0 "$_BASE/health" >/dev/null 2>/dev/null && echo OK || true)"
+_http="$(command curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time 10 "$_BASE/health" 2>/dev/null || true)"
+echo "[health] http=${_http:-none}"
+if [[ "${_http:0:1}" == "2" || "${_http:0:1}" == "3" ]]; then
+  _health="OK"
+else
+  _health=""
+fi
 if command -v jq >/dev/null 2>&1; then
   _auth_enabled="$(printf '%s' "$_health" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
   if [[ -z "${_auth_enabled:-}" ]]; then
