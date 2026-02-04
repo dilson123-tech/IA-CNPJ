@@ -116,10 +116,14 @@ PYTHONFAULTHANDLER=1 uvicorn "$UVICORN_APP" --host "$BIND_HOST" --port "$PORT" -
 UV_PID=$!
 
 cleanup() {
+  local rc=$?
+  trap - EXIT
+  set +e
   if kill -0 "$UV_PID" 2>/dev/null; then
     kill -TERM "$UV_PID" 2>/dev/null || true
     wait "$UV_PID" 2>/dev/null || true
   fi
+  exit $rc
 }
 trap cleanup EXIT
 
