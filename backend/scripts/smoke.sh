@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
 curl_auth() {
-  local rc=0 _was_x=0
-  [[ $- == *x* ]] && _was_x=1
-  set +x
-  if ((${#CURL_AUTH[@]})); then
-    command curl "${CURL_AUTH[@]}" "$@" || rc=$?
-  else
-    command curl "${CURL_AUTH[@]}" "$@" || rc=$?
-  fi
-  (( _was_x )) && set -x
+  local rc=0
+  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
   return $rc
 }
 
@@ -57,8 +50,7 @@ BASE="${BASE:-http://127.0.0.1:8100}"
 
 # auto-token quando AUTH estiver ligado (via /health)
 _BASE="${BASE_URL:-${BASE:-http://127.0.0.1:8100}}"
-_health="$(curl_auth -sS --max-time 3 "$_BASE/health" 2>/dev/null || true)"
-
+_health="$(curl_auth -fsS --max-time 3 "$_BASE/health" >/dev/null 2>/dev/null && echo OK || true)"
 if command -v jq >/dev/null 2>&1; then
   _auth_enabled="$(printf '%s' "$_health" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
   if [[ -z "${_auth_enabled:-}" ]]; then
