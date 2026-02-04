@@ -538,7 +538,8 @@ fi
 if [[ -z "${_auth_enabled:-}" ]]; then
   _auth_enabled="$(printf %s "$_health_json" | sed -n 's/.*"auth_enabled"[[:space:]]*:[[:space:]]*\\([^,}]*\\).*/\\1/p')"
 fi
-[[ "${_auth_enabled:-}" == "true" ]] && _auth_enabled="true" || _auth_enabled="false"echo "OK"
+[[ "${_auth_enabled:-}" == "true" ]] && _auth_enabled="true" || _auth_enabled="false"
+  echo "OK"
 
 echo
 echo "[2/5] cria transação sem categoria (category_id=null)"
@@ -554,7 +555,7 @@ TX_CREATE="$(curl_json POST "$API/transactions" "$PAYLOAD")" || exit $?
 # se o backend respondeu erro (JSON sem .id), mostra e morre bonito
 if ! echo "$TX_CREATE" | jq -e 'has("id")' >/dev/null 2>&1; then
   echo "❌ /transactions falhou. Resposta:" >&2
-jq . >&2 || echo "$TX_CREATE" >&2 "$TX_CREATE_file"
+echo "$TX_CREATE" | jq . >&2 || echo "$TX_CREATE" >&2
   exit 2
 fi
 
@@ -564,7 +565,7 @@ TX_CAT="$(jq -r '.category_id' <<<"$TX_CREATE")"
 [[ "$TX_ID" =~ ^[0-9]+$ ]] || die "tx_id inválido: $TX_ID"
 [[ "$TX_CAT" == "null" ]] || die "esperava category_id null ao criar, veio: $TX_CAT"
 
-echo "OK: tx_id=$TX_ID category_id=null desc="internet fibra ${SMOKE_TAG}""
+echo "OK: tx_id=$TX_ID category_id=null desc=internet fibra ${SMOKE_TAG}"
 
 echo
 echo
@@ -578,8 +579,11 @@ SUGG="$(curl_json POST "$API/ai/suggest-categories" "$PAYLOAD_SUGG")" || exit $?
   SUG_JSON="$SUGG"
 
 # valida que veio sugestão pro TX_ID
-jq -e --argjson tx "$TX_ID" '.items | any(.id == $tx)' >/dev/null \ "$SUGG_file"
-  || { echo "❌ não apareceu sugestão pro tx_id=$TX_ID"; echo "$SUGG" | jq '{period, count:(.items|length), sample:(.items[0])}'; exit 4; }
+  if ! echo "$SUGG" | jq -e --argjson tx "$TX_ID" '.items | any(.id == $tx)' >/dev/null 2>&1; then
+    echo "❌ não apareceu sugestão pro tx_id=$TX_ID"
+    echo "$SUGG" | jq '{period, count:(.items|length), sample:(.items[0] // null)}'
+    exit 4
+  fi
 
 echo "OK"
 APPLY_BODY_DRY="$(jq -nc --argjson cid "$COMPANY_ID" --arg s "$START" --arg e "$END" --argjson lim "$LIMIT" --argjson inm "$INCLUDE_NO_MATCH" '{
