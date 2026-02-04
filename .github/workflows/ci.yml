@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: backend
@@ -47,7 +47,7 @@ jobs:
           find scripts -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -x -S error
 
   settings_contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: lint
     defaults:
       run:
@@ -116,7 +116,7 @@ jobs:
 
 
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [lint, settings_contract]
     steps:
       - uses: actions/checkout@v4
