@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SMOKE_FORCE_NO_XTRACE: evita herdar xtrace do runner (e evita leak / crash raro)
+SMOKE_FORCE_NO_XTRACE=1
+set +x
 curl_auth() {
   local rc=0
   local _was_x=0

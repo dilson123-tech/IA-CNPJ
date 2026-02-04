@@ -149,7 +149,7 @@ done
 echo "[4/4] smoke_ai_apply"
 
 echo "[5/5] smoke (inclui /ai/consult)"
-BASE="${API:-http://127.0.0.1:8100}" bash scripts/smoke.sh
+BASE="${API:-http://127.0.0.1:8100}" env -u SHELLOPTS -u BASHOPTS bash --noprofile --norc scripts/smoke.sh
 cd "$ROOT"
 API_CNPJ="$API_CNPJ" ./backend/scripts/smoke_ai_apply.sh
 
