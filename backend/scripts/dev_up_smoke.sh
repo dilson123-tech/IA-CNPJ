@@ -151,13 +151,23 @@ echo "[4/4] smoke_ai_apply"
 echo "[5/5] smoke (inclui /ai/consult)"
 # smoke em ambiente limpo; se bash crashar (rc=139), fallback python
 set +e
-env -i BASE="${API:-http://127.0.0.1:8100}" PATH="$PATH" HOME="$HOME" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-  bash --noprofile --norc scripts/smoke.sh
+env -i BASE="${API:-http://127.0.0.1:8100}" PATH="$PATH" HOME="$HOME" LANG=C.UTF-8 LC_ALL=C.UTF-8 
+  if [[ "${SMOKE_BASH:-0}" == "1" ]]; then
+    ulimit -c 0 || true
+    bash --noprofile --norc scripts/smoke.sh
+  else
+    # bash smoke segfaulta em alguns ambientes -> força fallback python
+    (exit 139)
+  fi
 rc=$?
 set -e
 
 if [[ "${rc:-0}" -eq 139 ]]; then
+  if [[ "${SMOKE_BASH:-0}" == "1" ]]; then
   echo "WARN: smoke.sh segfault (rc=139); rodando fallback python..."
+else
+  echo "[smoke] bash smoke desativado (SMOKE_BASH=0); rodando smoke python..."
+fi
   python - <<'PY_SMOKE'
 import json, os, sys, urllib.request
 
