@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: backend
@@ -47,7 +47,7 @@ jobs:
           find scripts -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -x -S error
 
   settings_contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: lint
     defaults:
       run:
@@ -109,14 +109,14 @@ jobs:
           expect_fail_grep "protect_docs requires auth" "AUTH_PROTECT_DOCS|AUTH_ENABLED"             env IA_CNPJ_ENV=lab IA_CNPJ_AUTH_ENABLED=false IA_CNPJ_AUTH_PROTECT_DOCS=true python -c "import app.main"
 
           # 3) AUTH_ENABLED=true exige AUTH_JWT_SECRET preenchido
-          expect_fail_grep "jwt secret required" "AUTH_JWT_SECRET vazio"             env IA_CNPJ_ENV=lab IA_CNPJ_AUTH_ENABLED=true IA_CNPJ_AUTH_JWT_SECRET= python -c "import app.main"
+          expect_fail_grep "jwt secret required" "AUTH_JWT_SECRET vazio"             env IA_CNPJ_ENV=lab IA_CNPJ_AUTH_ENABLED=true IA_CNPJ_AUTH_USERNAME=admin IA_CNPJ_AUTH_PASSWORD=Aurea@12345 IA_CNPJ_AUTH_JWT_SECRET= python -c "import app.main"
 
           # 4) happy path
-          expect_pass "happy path import"             env IA_CNPJ_ENV=prod IA_CNPJ_AUTH_ENABLED=true IA_CNPJ_AUTH_PROTECT_DOCS=true                 IA_CNPJ_AUTH_JWT_SECRET=0123456789abcdef0123456789abcdef                 python -c "import app.main; print('IMPORT OK ✅')"
+          expect_pass "happy path import"             env IA_CNPJ_ENV=prod IA_CNPJ_AUTH_ENABLED=true IA_CNPJ_AUTH_PROTECT_DOCS=true IA_CNPJ_AUTH_USERNAME=admin IA_CNPJ_AUTH_PASSWORD=Aurea@12345                 IA_CNPJ_AUTH_JWT_SECRET=0123456789abcdef0123456789abcdef                 python -c "import app.main; print('IMPORT OK ✅')"
 
 
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [lint, settings_contract]
     steps:
       - uses: actions/checkout@v4
@@ -132,6 +132,13 @@ jobs:
       - name: Smoke (make dev)
         env:
           DATABASE_URL: sqlite:////tmp/ia_cnpj_ci.db
+          IA_CNPJ_ENV: lab
+          IA_CNPJ_AUTH_ENABLED: "true"
+          IA_CNPJ_AUTH_JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          IA_CNPJ_AUTH_USERNAME: admin
+          IA_CNPJ_AUTH_PASSWORD: Aurea@12345
+          SMOKE_AUTH_USER: admin
+          SMOKE_AUTH_PASS: Aurea@12345
         shell: bash
         run: |
           set -euo pipefail
@@ -139,7 +146,7 @@ jobs:
           export SHELLOPTS
 
           # sanity: bash filho herda xtrace via SHELLOPTS
-          bash -lc '[[ $- == *x* ]] && echo "xtrace inherited ✅"'
+          bash --noprofile --norc -c '[[ $- == *x* ]] && echo "xtrace inherited ✅"'
 
           make dev |& tee /tmp/ci_smoke.log
 

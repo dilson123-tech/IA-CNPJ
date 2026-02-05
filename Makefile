@@ -22,7 +22,7 @@ help:
 	@echo "  make venv       - cria venv + instala deps (backend/requirements.txt)"
 	@echo "  make dev        - alembic + sobe API + smoke + encerra (script)"
 	@echo "  make smoke      - roda smoke_ai_apply apontando pra API_CNPJ"
-	@echo "  make api        - sobe uvicorn (foreground) na PORT"
+	@echo "  make api        - sobe uvicorn (foreground) na PORT" --loop asyncio --http h11
 	@echo "  make db         - alembic upgrade head"
 	@echo ""
 	@echo "Vars:"

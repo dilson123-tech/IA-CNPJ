@@ -1,17 +1,88 @@
 #!/usr/bin/env bash
+# SMOKE_FORCE_NO_XTRACE: evita herdar xtrace do runner (e evita leak / crash raro)
+SMOKE_FORCE_NO_XTRACE=1
+set +x
+curl_auth() {
+  local rc=0
+  local _was_x=0
+  case "$-" in *x*) _was_x=1; set +x ;; esac
+
+  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+
+  # workaround hard: curl segfault (rc=139) em runner -> fallback python para GET simples
+  if (( rc == 139 )); then
+    local has_body=0 has_method=0 a
+    for a in "$@"; do
+      case "$a" in
+        -d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form) has_body=1 ;;
+        -X|--request) has_method=1 ;;
+      esac
+    done
+    if (( has_body==0 && has_method==0 )); then
+      local url="${@: -1}"
+      rc=0
+      python - "$url" <<'PYF'
+import sys, urllib.request
+url = sys.argv[1]
+req = urllib.request.Request(url, method="GET")
+try:
+    with urllib.request.urlopen(req, timeout=15) as r:
+        sys.stdout.buffer.write(r.read())
+except Exception as e:
+    sys.stderr.write(f"[curl_auth py fallback] error: {e}\n")
+    sys.exit(7)
+PYF
+      rc=$?
+    fi
+  fi
+
+  if (( rc != 0 )); then
+    local url="${@: -1}"
+    echo "[curl_auth] rc=$rc url=$url" >&2
+  fi
+
+  (( _was_x )) && set -x
+  return $rc
+}
+
+
 set -euo pipefail
+
+# === CI bootstrap: curl_auth SEMPRE existe antes de usar (e não vaza token sob xtrace) ===
+declare -a CURL_AUTH=()
+curl_auth() {
+  local rc=0 _was_x=0
+  [[ $- == *x* ]] && _was_x=1
+  (( _was_x )) && set +x
+  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+  (( _was_x )) && set -x
+  return $rc
+}
+# força TODAS as chamadas 'curl' passarem pelo wrapper (exceto quando usar 'command curl')
+curl() { curl_auth "$@"; }
+
 
 # === AUTH SMOKE AUTO-TOKEN ===
 CURL_AUTH=()
+CURL_AUTH_KEEP=()
 
-# wrap curl: usa 'command curl' e anexa Authorization quando CURL_AUTH estiver setado
-# 🔒 xtrace guard: se estiver em 'bash -x', desliga xtrace só durante o curl real (não vaza token)
-curl() {
+restore_auth() {
+  # guarda o primeiro header válido e restaura se alguém zerar CURL_AUTH
+  if [[ ${#CURL_AUTH_KEEP[@]} -eq 0 ]] && [[ ${#CURL_AUTH[@]} -gt 0 ]]; then
+    CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
+  fi
+  if [[ "${_auth_enabled:-}" == "true" ]] && [[ ${#CURL_AUTH[@]} -eq 0 ]] && [[ ${#CURL_AUTH_KEEP[@]} -gt 0 ]]; then
+    CURL_AUTH=("${CURL_AUTH_KEEP[@]}")
+  fi
+}
+# wrap curl_auth: usa 'command curl' e anexa Authorization quando CURL_AUTH estiver setado
+# 🔒 xtrace guard: se estiver em 'bash -x', desliga xtrace só durante o curl_auth real (não vaza token)
+curl_auth() {
   local _was_x=0
   [[ $- == *x* ]] && _was_x=1
   ((_was_x)) && set +x
   local rc=0
-  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+  curl_auth "${CURL_AUTH[@]}" "$@" || rc=$?
   ((_was_x)) && set -x
   return $rc
 }
@@ -20,8 +91,13 @@ BASE="${BASE:-http://127.0.0.1:8100}"
 
 # auto-token quando AUTH estiver ligado (via /health)
 _BASE="${BASE_URL:-${BASE:-http://127.0.0.1:8100}}"
-_health="$(command curl -sS --max-time 3 "$_BASE/health" 2>/dev/null || true)"
-
+_http="$(command curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time 10 "$_BASE/health" 2>/dev/null || true)"
+echo "[health] http=${_http:-none}"
+if [[ "${_http:0:1}" == "2" || "${_http:0:1}" == "3" ]]; then
+  _health="OK"
+else
+  _health=""
+fi
 if command -v jq >/dev/null 2>&1; then
   _auth_enabled="$(printf '%s' "$_health" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
   if [[ -z "${_auth_enabled:-}" ]]; then
@@ -46,9 +122,11 @@ if [[ "$_auth_enabled" == "true" ]]; then
 
     _smoke_xtrace=0
     if [[ $- == *x* ]]; then _smoke_xtrace=1; set +x; fi
-    _resp="$(command curl -sS --max-time 5 "$_BASE/auth/login" \
+    _resp_file="${TMPDIR:-/tmp}/ia-cnpj__resp_$$.out"
+    curl_auth -sS --max-time 5 "$_BASE/auth/login" \
       -H 'Content-Type: application/json' \
-      -d "{\"username\":\"${_user}\",\"password\":\"${_pass}\"}")"
+      -d "{\"username\":\"${_user}\",\"password\":\"${_pass}\"}" >"${_resp_file}"
+    _resp=""  # não carregar payload em variável (evita rc=139)
 
     if command -v jq >/dev/null 2>&1; then
       _tok="$(printf '%s' "$_resp" | jq -er '.access_token // empty' 2>/dev/null || true)"
@@ -65,7 +143,18 @@ if [[ "$_auth_enabled" == "true" ]]; then
     exit 1
   fi
 
-  CURL_AUTH=(-H "Authorization: Bearer ${_tok}")
+  __x=0
+
+  [[ $- == *x* ]] && __x=1 && set +x
+
+  __hdr=/tmp/ia_cnpj_auth_header
+
+  printf 'Authorization: Bearer %s' "${_tok}" > "$__hdr"
+
+  CURL_AUTH=(-H "@$__hdr")
+
+  ((__x==1)) && set -x
+
     if [[ $_smoke_xtrace -eq 1 ]]; then set -x; fi
   echo "[smoke] auth_enabled=true (token ok)"
 else
@@ -75,7 +164,8 @@ fi
 # autodetect prefix (/api/v1) via OpenAPI (compat)
 API_PREFIX="${API_PREFIX:-}"
 if [ -z "$API_PREFIX" ]; then
-  oa="$(curl -sS --max-time 6 "$BASE/openapi.json" || true)"
+oa_file="${TMPDIR:-/tmp}/ia-cnpj_openapi_$$.json"
+curl_auth -sS --connect-timeout 1 --max-time 15 "$_BASE/openapi.json" >"$oa_file"
   if echo "$oa" | jq -e '.paths["/api/v1/ai/consult"]' >/dev/null 2>&1; then
     API_PREFIX="/api/v1"
   else
@@ -101,9 +191,12 @@ fail() { echo "❌ $*"; exit 1; }
 # - valida HTTP 2xx
 # - valida JSON (jq)
 req_json() {
+  restore_auth
   local timeout="$1"; local method="$2"; local url="$3"; local out="$4"; shift 4
   local code
-  code="$(curl -sS --max-time "$timeout" -o "$out" -w '%{http_code}' -X "$method" "$url" "$@" || echo "000")"
+  code_file="${TMPDIR:-/tmp}/ia-cnpj_code_$$.out"
+  curl_auth -sS --max-time "$timeout" -o "$out" -w '%{http_code}' -X "$method" "$url" "$@" || echo "000" >"${code_file}"
+  code=""  # não carregar payload em variável (evita rc=139)
 
   if [[ ! "$code" =~ ^2[0-9][0-9]$ ]]; then
     echo "❌ HTTP $code $method $url"
@@ -133,7 +226,9 @@ ensure_company() {
   fi
 
   get_tmp="/tmp/smoke_pre_company_get.json"
-  get_code="$(curl -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$BASE/companies/$COMPANY_ID" || echo "000")"
+  get_code_file="${TMPDIR:-/tmp}/ia-cnpj_get_code_$$.out"
+  curl_auth -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$BASE/companies/$COMPANY_ID" || echo "000" >"${get_code_file}"
+  get_code=""  # não carregar payload em variável (evita rc=139)
 
   if [[ "$get_code" =~ ^2[0-9][0-9]$ ]]; then
     # existe
@@ -146,15 +241,20 @@ ensure_company() {
 
   seed_tmp="/tmp/smoke_pre_seed_company.json"
   seed_url="$BASE/companies"
-  seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+  seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
+  curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
     -H 'Content-Type: application/json' \
-    -d "$payload" || echo "000")"
+    -d "$payload" || echo "000" >"${seed_code_file}"
+  seed_code=""  # não carregar payload em variável (evita rc=139)
 
   if [ "$seed_code" = "404" ]; then
     seed_url="$BASE/api/v1/companies"
-    seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+    seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
+    curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
-      -d "$payload" || echo "000")"
+      -d "$payload" || echo "000" >"${seed_code_file}"
+    seed_code=""  # não carregar payload em variável (evita rc=139)
+
   fi
 
   if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ] && [ "$seed_code" != "409" ]; then
@@ -167,10 +267,16 @@ ensure_company() {
     echo "ℹ️ preflight: 409 (CNPJ já cadastrado); buscando id existente..."
     lookup_tmp="/tmp/smoke_pre_lookup_companies.json"
     lookup_url="$seed_url"
-    lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+    lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
+    curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000" >"${lookup_code_file}"
+    lookup_code=""  # não carregar payload em variável (evita rc=139)
+
     if [ "$lookup_code" = "404" ]; then
       lookup_url="$BASE/api/v1/companies"
-      lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+      lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
+      curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000" >"${lookup_code_file}"
+      lookup_code=""  # não carregar payload em variável (evita rc=139)
+
     fi
     existing_id="$(jq -r --arg c "$SMOKE_CNPJ" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
     if [ -z "$existing_id" ] || [ "$existing_id" = "null" ]; then
@@ -279,7 +385,7 @@ tmp="/tmp/ai_consult_contract.json"
 
 call_consult () {
   local url="$1"
-  curl -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$url" \
+  curl_auth -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$url" \
     -H 'Content-Type: application/json' \
     -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":20,\"question\":\"onde estou gastando mais?\"}"
 }
@@ -299,16 +405,21 @@ if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp
 
   seed_tmp="/tmp/ai_consult_seed_company.json"
   seed_url="$BASE/companies"
-  seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+  seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
+  curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
     -H 'Content-Type: application/json' \
-    -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}')"
+    -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}' >"${seed_code_file}"
+  seed_code=""  # não carregar payload em variável (evita rc=139)
 
   # fallback pra /api/v1/companies se necessário
   if [ "$seed_code" = "404" ]; then
     seed_url="$BASE/api/v1/companies"
-    seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+    seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
+    curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
-      -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}')"
+      -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}' >"${seed_code_file}"
+    seed_code=""  # não carregar payload em variável (evita rc=139)
+
   fi
   if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ] && [ "$seed_code" != "409" ]; then
     echo "❌ seed company falhou HTTP $seed_code ($seed_url)"
@@ -319,10 +430,16 @@ if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp
     echo "ℹ️ seed retornou 409 (CNPJ já cadastrado); buscando id existente..."
     lookup_tmp="/tmp/ai_consult_lookup_company.json"
     lookup_url="$seed_url"
-    lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url")"
+    lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
+    curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" >"${lookup_code_file}"
+    lookup_code=""  # não carregar payload em variável (evita rc=139)
+
     if [ "$lookup_code" = "404" ]; then
       lookup_url="$BASE/api/v1/companies"
-      lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url")"
+      lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
+      curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" >"${lookup_code_file}"
+      lookup_code=""  # não carregar payload em variável (evita rc=139)
+
     fi
     existing_id="$(jq -r --arg c "12345678000195" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
     if [ -z "$existing_id" ] || [ "$existing_id" = "null" ]; then
@@ -374,7 +491,7 @@ jq -e '
 echo "OK"
 
 
-curl -sS --max-time 6 -H 'Content-Type: application/json' \
+curl_auth -sS --max-time 6 -H 'Content-Type: application/json' \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":10,\"question\":\"smoke\"}" \
   "$BASE_API/ai/consult" | jq -e . >/dev/null
 echo "OK"

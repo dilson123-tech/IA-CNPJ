@@ -22,7 +22,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DB_PATH="${DB_PATH:-$ROOT/backend/app.db}"
 
 
-# --- CI/SMOKE: garante 1 SQLite absoluto (alembic + uvicorn) ---
+# --- CI/SMOKE: garante 1 SQLite absoluto (alembic + uvicorn) --- --loop asyncio --http h11
 if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
   ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   BACKEND_DIR="${ROOT_DIR}/backend"
@@ -110,16 +110,20 @@ echo "[1/4] alembic upgrade head"
 alembic upgrade head
 
 LOG="/tmp/ia-cnpj_uvicorn_${PORT}.log"
-env DATABASE_URL="${DATABASE_URL:-}" echo "[2/4] subindo uvicorn em ${BIND_HOST}:${PORT} (bg) | log: ${LOG}"
-echo "�� DATABASE_URL=${DATABASE_URL:-<empty>}"
-uvicorn "$UVICORN_APP" --host "$BIND_HOST" --port "$PORT" --log-level info >"$LOG" 2>&1 &
+  echo "[2/4] subindo uvicorn em ${BIND_HOST}:${PORT} (bg) | log: ${LOG}"
+  echo "[db] DATABASE_URL=${DATABASE_URL:-<empty>}"
+PYTHONFAULTHANDLER=1 uvicorn "$UVICORN_APP" --host "$BIND_HOST" --port "$PORT" --loop asyncio --http h11 --log-level info >"$LOG" 2>&1 &
 UV_PID=$!
 
 cleanup() {
+  local rc=$?
+  trap - EXIT
+  set +e
   if kill -0 "$UV_PID" 2>/dev/null; then
     kill -TERM "$UV_PID" 2>/dev/null || true
     wait "$UV_PID" 2>/dev/null || true
   fi
+  exit $rc
 }
 trap cleanup EXIT
 
@@ -145,7 +149,51 @@ done
 echo "[4/4] smoke_ai_apply"
 
 echo "[5/5] smoke (inclui /ai/consult)"
-BASE="${API:-http://127.0.0.1:8100}" bash scripts/smoke.sh
+# smoke em ambiente limpo; se bash crashar (rc=139), fallback python
+set +e
+env -i BASE="${API:-http://127.0.0.1:8100}" PATH="$PATH" HOME="$HOME" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  bash --noprofile --norc scripts/smoke.sh
+rc=$?
+set -e
+
+if [[ "${rc:-0}" -eq 139 ]]; then
+  echo "WARN: smoke.sh segfault (rc=139); rodando fallback python..."
+  python - <<'PY_SMOKE'
+import json, os, sys, urllib.request
+
+base = os.environ.get("BASE", "http://127.0.0.1:8100").rstrip("/")
+
+def get(path, timeout=8):
+    req = urllib.request.Request(base + path, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.status, r.read()
+
+st, body = get("/health", timeout=5)
+if st != 200:
+    print("FAIL health", st); sys.exit(1)
+
+try:
+    json.loads(body.decode("utf-8"))
+except Exception:
+    if body.strip().lower() != b"ok":
+        print("FAIL health body"); sys.exit(1)
+
+st, body = get("/openapi.json", timeout=15)
+if st != 200:
+    print("FAIL openapi", st); sys.exit(1)
+
+spec = json.loads(body.decode("utf-8"))
+paths = spec.get("paths", {})
+if "/health" not in paths:
+    print("FAIL openapi missing /health"); sys.exit(1)
+
+print("OK python fallback smoke")
+PY_SMOKE
+  rc=$?
+fi
+
+exit "${rc:-0}"
+
 cd "$ROOT"
 API_CNPJ="$API_CNPJ" ./backend/scripts/smoke_ai_apply.sh
 

@@ -1,8 +1,248 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# === CI bootstrap: curl_auth SEMPRE existe antes de usar (e não vaza token sob xtrace) ===
+declare -a CURL_AUTH=()
+curl_auth() {
+  local rc=0
+  local _was_x=0
+  case "$-" in *x*) _was_x=1; set +x ;; esac
 
-# --- curl helper: retorna JSON completo, sem truncar, e valida com jq ---
+  command curl "${CURL_AUTH[@]}" "$@" || rc=$?
+
+  # workaround hard: curl segfault (rc=139) em runner -> fallback python para GET simples
+  if (( rc == 139 )); then
+    local has_body=0 has_method=0 a
+    for a in "$@"; do
+      case "$a" in
+        -d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form) has_body=1 ;;
+        -X|--request) has_method=1 ;;
+      esac
+    done
+    if (( has_body==0 && has_method==0 )); then
+      local url="${@: -1}"
+      rc=0
+      python - "$url" <<'PYF'
+import sys, urllib.request
+url = sys.argv[1]
+req = urllib.request.Request(url, method="GET")
+try:
+    with urllib.request.urlopen(req, timeout=15) as r:
+        sys.stdout.buffer.write(r.read())
+except Exception as e:
+    sys.stderr.write(f"[curl_auth py fallback] error: {e}\n")
+    sys.exit(7)
+PYF
+      rc=$?
+    fi
+  fi
+
+  if (( rc != 0 )); then
+    local url="${@: -1}"
+    echo "[curl_auth] rc=$rc url=$url" >&2
+  fi
+
+  (( _was_x )) && set -x
+  return $rc
+}
+
+# força TODAS as chamadas 'curl' passarem pelo wrapper (exceto quando usar 'command curl')
+curl() { curl_auth "$@"; }
+
+
+# compat: IA_CNPJ_AUTH_ENABLED (legado) deve seguir AUTH_ENABLED
+: "${IA_CNPJ_AUTH_ENABLED:=${AUTH_ENABLED:-false}}"
+if [[ "${IA_CNPJ_AUTH_ENABLED}" == "1" ]]; then IA_CNPJ_AUTH_ENABLED=true; fi
+export IA_CNPJ_AUTH_ENABLED
+
+
+
+CURL_AUTH=()
+
+# bootstrap: guarantee curl_auth (CI roda com xtrace; wrapper desliga xtrace durante curl_auth)
+type curl_auth >/dev/null 2>&1 || curl_auth() {
+  local rc=0
+  local was_xtrace=0
+  [[ $- == *x* ]] && was_xtrace=1 && set +x
+  curl_auth "${CURL_AUTH[@]}" "$@" || rc=$?
+  ((was_xtrace==1)) && set -x
+  return $rc
+}
+
+
+# AUTH_PREFLIGHT_V2 (auto)
+: "${BASE_API:=http://127.0.0.1:8100}"
+_auth_env="${IA_CNPJ_AUTH_ENABLED:-${AUTH_ENABLED:-}}"
+
+# CI/PR: se _auth_env pedir token mas BEARER_TOKEN não veio, cai pra login (evita exit 139)
+if [[ "${_auth_env:-false}" == "true" && -z "${BEARER_TOKEN:-}" ]]; then
+  echo "ℹ️  auth_env=true mas BEARER_TOKEN vazio -> fallback pra login" >&2
+  _auth_env="false"  # fallback pra login
+fi
+
+# segurança: se xtrace veio herdado, desliga antes de tocar em user/pass/token (não vaza no log)
+if [[ $- == *x* ]]; then set +x; fi
+if [[ "${_auth_env}" == "true" ]]; then
+  _u="${SMOKE_AUTH_USER:-${IA_CNPJ_AUTH_USERNAME:-${AUTH_USERNAME:-admin}}}"
+  _p="${SMOKE_AUTH_PASS:-${IA_CNPJ_AUTH_PASSWORD:-${AUTH_PASSWORD:-}}}"
+  if [[ -z "${_p}" ]]; then
+    echo "❌ smoke auth: senha ausente (set SMOKE_AUTH_PASS ou IA_CNPJ_AUTH_PASSWORD/AUTH_PASSWORD)" >&2
+    exit 1
+  fi
+  # xtrace OFF: não vazar user/pass/token
+  _x=0; [[ $- == *x* ]] && _x=1 && set +x
+  _tok_json_file="${TMPDIR:-/tmp}/ia-cnpj__tok_json_$$.out"
+  curl_auth -sS -X POST "${BASE_API%/}/auth/login" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "username=${_u}" \
+    --data-urlencode "password=${_p}" >"${_tok_json_file}"
+  _tok_json=""  # não carregar payload em variável (evita rc=139)
+
+  if command -v jq >/dev/null 2>&1; then
+    _tok="$(printf '%s' "$_tok_json" | jq -r '.access_token // empty' 2>/dev/null || true)"
+  else
+    _tok=""
+  fi
+  if [[ -z "${_tok}" ]]; then
+    (( _x )) && set -x
+    echo "❌ falhou pegar access_token (auth enabled)" >&2
+    exit 1
+  fi
+  __x=0
+  [[ $- == *x* ]] && __x=1 && set +x
+  __hdr=/tmp/ia_cnpj_auth_header
+  printf 'Authorization: Bearer %s' "${_tok}" > "$__hdr"
+  CURL_AUTH=(-H "@$__hdr")
+  ((__x==1)) && set -x
+
+  (( _x )) && set -x
+  echo "ℹ️ auth preflight: token carregado ✅"
+else
+  echo "ℹ️ auth preflight: auth desligado (IA_CNPJ_AUTH_ENABLED != true)"
+fi
+
+CURL_AUTH_KEEP=()
+
+restore_auth() {
+  if [[ ${#CURL_AUTH_KEEP[@]} -eq 0 ]] && [[ ${#CURL_AUTH[@]} -gt 0 ]]; then
+    CURL_AUTH_KEEP=()
+  fi
+  if [[ "${_auth_enabled:-}" == "true" ]] && [[ ${#CURL_AUTH[@]} -eq 0 ]] && [[ ${#CURL_AUTH_KEEP[@]} -gt 0 ]]; then
+    CURL_AUTH=("${CURL_AUTH_KEEP[@]}")
+  fi
+}
+
+curl_auth() {
+  # AUTO_LOGIN_ON_DEMAND: se auth está ligado e não temos token, faz login antes do request
+  if [[ ${#CURL_AUTH[@]} -eq 0 ]]; then
+    local _enabled="${IA_CNPJ_AUTH_ENABLED:-${AUTH_ENABLED:-}}"
+    if [[ "${_enabled}" == "true" || "${_enabled}" == "1" ]]; then
+      local _user="${SMOKE_AUTH_USER:-}" _pass="${SMOKE_AUTH_PASS:-}"
+      if [[ -z "${_user}" || -z "${_pass}" ]]; then
+        echo "❌ SMOKE_AUTH_USER/SMOKE_AUTH_PASS obrigatórios quando auth está ligado" >&2
+        exit 1
+      fi
+
+      local _login_url="${BASE%/}/auth/login"
+      local _tmp _code _tok _i
+      local _was_x=0
+      [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
+      (( _was_x )) && set +x
+
+      for _i in {1..25}; do
+        _tmp="$(mktemp)"
+        _code="$(command curl -sS --max-time 6 -o "${_tmp}" -w '%{http_code}' \
+          -X POST "${_login_url}" \
+          -H 'Content-Type: application/json' \
+          -d "{\"username\":\"${_user}\",\"password\":\"${_pass}\"}" || true
+        )"
+
+        _tok=""
+        if command -v jq >/dev/null 2>&1; then
+          _tok="$(jq -er '.access_token' "${_tmp}" 2>/dev/null || true)"
+        fi
+        if [[ -z "${_tok}" ]]; then
+          _tok="$(sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${_tmp}" | head -n1)"
+        fi
+        rm -f "${_tmp}"
+
+        if [[ "${_code}" == 2* && -n "${_tok}" ]]; then
+          __x=0
+          [[ $- == *x* ]] && __x=1 && set +x
+          __hdr=/tmp/ia_cnpj_auth_header
+          printf 'Authorization: Bearer %s' "${_tok}" > "$__hdr"
+          CURL_AUTH=(-H "@$__hdr")
+          ((__x==1)) && set -x
+
+          CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
+          break
+        fi
+        sleep 0.2
+      done
+
+      (( _was_x )) && set -x
+
+      if [[ ${#CURL_AUTH[@]} -eq 0 ]]; then
+        echo "❌ falhou pegar access_token do /auth/login (auto-login do curl_auth)" >&2
+        exit 1
+      fi
+    fi
+  fi
+
+  # roda curl_auth com header global sem vazar em xtrace
+  local _was_x=0
+  [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
+  (( _was_x )) && set +x
+  command curl "${CURL_AUTH[@]}" "$@"
+  local rc=$?
+  # xtrace será restaurado após setar CURL_AUTH
+  return $rc
+}
+
+
+# AUTH_PREFLIGHT (auto)
+# se a API disser auth_enabled=true, faz login e seta header (sem vazar no xtrace)
+: "${BASE_API:=http://127.0.0.1:8100}"
+_health_json_file="${TMPDIR:-/tmp}/ia-cnpj__health_json_$$.out"
+curl_auth -sS "${BASE_API%/}/health" 2>/dev/null || true >"${_health_json_file}"
+_health_json=""  # não carregar payload em variável (evita rc=139)
+
+if command -v jq >/dev/null 2>&1; then
+  _auth_enabled="$(printf '%s' "$_health_json" | jq -r '.auth_enabled // false' 2>/dev/null || echo false)"
+else
+  _auth_enabled=false
+fi
+
+if [[ "${_auth_enabled}" == "true" ]]; then
+  _u="${SMOKE_AUTH_USER:-${IA_CNPJ_AUTH_USERNAME:-${AUTH_USERNAME:-admin}}}"
+  _p="${SMOKE_AUTH_PASS:-${IA_CNPJ_AUTH_PASSWORD:-${AUTH_PASSWORD:-}}}"
+  if [[ -z "${_p}" ]]; then
+    echo "❌ smoke auth: senha ausente (set SMOKE_AUTH_PASS ou IA_CNPJ_AUTH_PASSWORD/AUTH_PASSWORD)" >&2
+    exit 1
+  fi
+  _tok_json_file="${TMPDIR:-/tmp}/ia-cnpj__tok_json_$$.out"
+  curl_auth -sS -X POST "${BASE_API%/}/auth/login" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "username=${_u}" \
+    --data-urlencode "password=${_p}" >"${_tok_json_file}"
+  _tok_json=""  # não carregar payload em variável (evita rc=139)
+
+  _tok="$(printf '%s' "$_tok_json" | jq -r '.access_token // empty' 2>/dev/null || echo '')"
+  if [[ -z "${_tok}" ]]; then
+    echo "❌ falhou pegar access_token (auth enabled)" >&2
+    exit 1
+  fi
+  __x=0
+  [[ $- == *x* ]] && __x=1 && set +x
+  __hdr=/tmp/ia_cnpj_auth_header
+  printf 'Authorization: Bearer %s' "${_tok}" > "$__hdr"
+  CURL_AUTH=(-H "@$__hdr")
+  ((__x==1)) && set -x
+
+fi
+
+
+# --- curl_auth helper: retorna JSON completo, sem truncar, e valida com jq ---
 _curl_json() {
   local method="$1"; shift
   local url="$1"; shift
@@ -13,12 +253,12 @@ _curl_json() {
   tmp_code="$(mktemp)"
 
   if [[ -n "$body" ]]; then
-    curl -sS --max-time 30 -X "$method" "$url" \
+    curl_auth -sS --max-time 30 -X "$method" "$url" \
       -H "Content-Type: application/json" \
       --data "$body" \
       -o "$tmp_body" -w '%{http_code}' > "$tmp_code"
   else
-    curl -sS --max-time 30 -X "$method" "$url" \
+    curl_auth -sS --max-time 30 -X "$method" "$url" \
       -o "$tmp_body" -w '%{http_code}' > "$tmp_code"
   fi
 
@@ -46,11 +286,65 @@ _curl_json() {
 API="${API_CNPJ:-http://127.0.0.1:8100}"
 API="$(printf '%s' "$API" | tr -d '\r')"
 BASE="$API"
+# AUTH_BOOTSTRAP_EARLY (auto)
+type die >/dev/null 2>&1 || die(){ echo "❌ $*"; exit 1; }
+
+# detecta auth_enabled via /health e faz login ANTES de qualquer /companies
+_auth_enabled=""
+_health_json_file="${TMPDIR:-/tmp}/ia-cnpj__health_json_$$.out"
+curl_auth -sS --max-time 3 "$BASE/health" || true >"${_health_json_file}"
+_health_json=""  # não carregar payload em variável (evita rc=139)
+
+if command -v jq >/dev/null 2>&1; then
+  _auth_enabled="$(printf %s "$_health_json" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
+fi
+if [[ -z "${_auth_enabled:-}" ]]; then
+  _auth_enabled="$(printf %s "$_health_json" | sed -n 's/.*"auth_enabled"[[:space:]]*:[[:space:]]*\([^,}]*\).*/\1/p')"
+fi
+[[ "${_auth_enabled:-}" == "true" ]] && _auth_enabled=true || _auth_enabled=false
+
+if [[ "${_auth_enabled}" == "true" ]] && [[ ${#CURL_AUTH[@]} -eq 0 ]]; then
+  _user="${SMOKE_AUTH_USER:-}"; _pass="${SMOKE_AUTH_PASS:-}"
+  [[ -z "$_user" || -z "$_pass" ]] && die "SMOKE_AUTH_USER/SMOKE_AUTH_PASS obrigatórios quando auth_enabled=true"
+  _login_url="$BASE/auth/login"
+  _tmp="$(mktemp)"
+  _was_x=0; [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
+  (( _was_x )) && set +x
+  _code_file="${TMPDIR:-/tmp}/ia-cnpj__code_$$.out"
+  curl_auth -sS --max-time 6 -o "$_tmp" -w '%{http_code}' -X POST "$_login_url" \
+    -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$_user\",\"password\":\"$_pass\"}" || true >"${_code_file}"
+  _code=""  # não carregar payload em variável (evita rc=139)
+
+  _tok=""
+  if command -v jq >/dev/null 2>&1; then
+    _tok="$(jq -er '.access_token' "$_tmp" 2>/dev/null || true)"
+  fi
+  if [[ -z "$_tok" ]]; then
+    _tok="$(sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_tmp" | head -n1)"
+  fi
+  rm -f "$_tmp"
+  [[ "${_code}" != 2* || -z "$_tok" ]] && die "falhou pegar access_token do /auth/login"
+  __x=0
+  [[ $- == *x* ]] && __x=1 && set +x
+  __hdr=/tmp/ia_cnpj_auth_header
+  printf 'Authorization: Bearer %s' "$_tok" > "$__hdr"
+  CURL_AUTH=(-H "@$__hdr")
+  ((__x==1)) && set -x
+
+  CURL_AUTH_KEEP=("${CURL_AUTH[@]}")
+  restore_auth
+  (( _was_x )) && set -x
+fi
+
 
 # autodetect prefix (/api/v1) via OpenAPI (compat)
 API_PREFIX="${API_PREFIX:-}"
 if [ -z "$API_PREFIX" ]; then
-  oa="$(curl -sS --max-time 6 "$BASE/openapi.json" || true)"
+  oa_file="${TMPDIR:-/tmp}/ia-cnpj_oa_$$.out"
+  curl_auth -sS --max-time 6 "$BASE/openapi.json" || true >"${oa_file}"
+  oa=""  # não carregar payload em variável (evita rc=139)
+
   if echo "$oa" | jq -e '.paths["/api/v1/ai/consult"]' >/dev/null 2>&1; then
     API_PREFIX="/api/v1"
   else
@@ -77,7 +371,7 @@ CLEANUP="${CLEANUP:-0}"
 die(){ echo "❌ $*" >&2; exit 1; }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "precisa de '$1' instalado"; }
-need curl
+need curl_auth
 need jq
 
 is_json() { jq -e . >/dev/null 2>&1; }
@@ -93,12 +387,12 @@ curl_json() {
   tmp_code="$(mktemp)"
 
   if [[ -n "$body" ]]; then
-    curl -sS --max-time 30 -X "$method" "$url" \
+    curl_auth -sS --max-time 30 -X "$method" "$url" \
       -H "Content-Type: application/json" \
       --data "$body" \
       -o "$tmp_body" -w '%{http_code}' > "$tmp_code"
   else
-    curl -sS --max-time 30 -X "$method" "$url" \
+    curl_auth -sS --max-time 30 -X "$method" "$url" \
       -o "$tmp_body" -w '%{http_code}' > "$tmp_code"
   fi
 
@@ -140,7 +434,9 @@ echo "[0/5] garante company_id=$COMPANY_ID (seed idempotente)"
 
   get_tmp="/tmp/smoke_ai_get_company.json"
   get_url="$API/companies/$COMPANY_ID"
-  get_code="$(curl -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$get_url" || echo "000")"
+  get_code_file="${TMPDIR:-/tmp}/ia-cnpj_get_code_$$.out"
+  curl_auth -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$get_url" || echo "000" >"${get_code_file}"
+  get_code=""  # não carregar payload em variável (evita rc=139)
 
   if [[ "$get_code" =~ ^2[0-9][0-9]$ ]] && jq -e '.id' "$get_tmp" >/dev/null 2>&1; then
     echo "OK: company_id=$COMPANY_ID existe"
@@ -150,27 +446,68 @@ echo "[0/5] garante company_id=$COMPANY_ID (seed idempotente)"
     COMP_PAYLOAD="$(jq -nc --arg cnpj "$SMOKE_CNPJ" --arg rs "$SMOKE_RAZAO" '{cnpj:$cnpj, razao_social:$rs}')"
 
     seed_tmp="/tmp/smoke_ai_seed_company.json"
+# auth: pega token (se auth_enabled=true)
+if [[ "${_auth_enabled:-false}" == "true" ]]; then
+  _user="${SMOKE_AUTH_USER:-}"
+  _pass="${SMOKE_AUTH_PASS:-}"
+  [[ -z "$_user" || -z "$_pass" ]] && die "SMOKE_AUTH_USER/SMOKE_AUTH_PASS obrigatórios quando auth_enabled=true"
+  _login_url="$BASE/auth/login"
+  _login_tmp="$(mktemp)"
+  _was_x=0; [[ "${SHELLOPTS:-}" == *xtrace* || "$-" == *x* ]] && _was_x=1
+  (( _was_x )) && set +x
+  _code_file="${TMPDIR:-/tmp}/ia-cnpj__code_$$.out"
+  curl_auth -sS --max-time 6 -o "$_login_tmp" -w '%{http_code}' -X POST "$_login_url" \
+    -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$_user\",\"password\":\"$_pass\"}" || true >"${_code_file}"
+  _code=""  # não carregar payload em variável (evita rc=139)
+
+  (( _was_x )) && set -x
+  [[ "$_code" != 2* ]] && { cat "$_login_tmp" >/dev/stderr || true; die "falhou pegar access_token do /auth/login"; }
+  _tok="$(jq -er '.access_token' "$_login_tmp" 2>/dev/null || true)"
+  rm -f "$_login_tmp"
+  [[ -z "$_tok" ]] && die "falhou extrair access_token do /auth/login"
+  __x=0
+  [[ $- == *x* ]] && __x=1 && set +x
+  __hdr=/tmp/ia_cnpj_auth_header
+  printf 'Authorization: Bearer %s' "$_tok" > "$__hdr"
+  CURL_AUTH=(-H "@$__hdr")
+  ((__x==1)) && set -x
+
+  restore_auth
+  (( _was_x )) && set -x
+fi
     seed_url="$API/companies"
-    seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+    seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
+    curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
       -H 'Content-Type: application/json' \
-      -d "$COMP_PAYLOAD" || echo "000")"
+      -d "$COMP_PAYLOAD" || echo "000" >"${seed_code_file}"
+    seed_code=""  # não carregar payload em variável (evita rc=139)
 
     # fallback /api/v1/companies
     if [ "$seed_code" = "404" ]; then
       seed_url="$API/api/v1/companies"
-      seed_code="$(curl -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
+      seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
+      curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
         -H 'Content-Type: application/json' \
-        -d "$COMP_PAYLOAD" || echo "000")"
+        -d "$COMP_PAYLOAD" || echo "000" >"${seed_code_file}"
+      seed_code=""  # não carregar payload em variável (evita rc=139)
+
     fi
 
     if [ "$seed_code" = "409" ]; then
       echo "ℹ️ CNPJ já cadastrado; buscando id existente..."
       lookup_tmp="/tmp/smoke_ai_lookup_company.json"
       lookup_url="$seed_url"
-      lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+      lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
+      curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000" >"${lookup_code_file}"
+      lookup_code=""  # não carregar payload em variável (evita rc=139)
+
       if [ "$lookup_code" = "404" ]; then
         lookup_url="$API/api/v1/companies"
-        lookup_code="$(curl -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000")"
+        lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
+        curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000" >"${lookup_code_file}"
+        lookup_code=""  # não carregar payload em variável (evita rc=139)
+
       fi
       new_id="$(jq -r --arg c "$SMOKE_CNPJ" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
     elif [ "$seed_code" = "200" ] || [ "$seed_code" = "201" ]; then
@@ -187,8 +524,22 @@ echo "[0/5] garante company_id=$COMPANY_ID (seed idempotente)"
   fi
 
 echo "[1/5] health"
-curl -sS --max-time 5 "$API/health" | jq . >/dev/null
-echo "OK"
+curl_auth -sS --max-time 5 "$API/health" | jq . >/dev/null
+
+# auth_enabled (via /health)
+_auth_enabled=""
+_health_json_file="${TMPDIR:-/tmp}/ia-cnpj__health_json_$$.out"
+curl_auth -sS --max-time 3 "$BASE/health" || true >"${_health_json_file}"
+_health_json=""  # não carregar payload em variável (evita rc=139)
+
+if command -v jq >/dev/null 2>&1; then
+  _auth_enabled="$(printf %s "$_health_json" | jq -er '.auth_enabled // false' 2>/dev/null || true)"
+fi
+if [[ -z "${_auth_enabled:-}" ]]; then
+  _auth_enabled="$(printf %s "$_health_json" | sed -n 's/.*"auth_enabled"[[:space:]]*:[[:space:]]*\\([^,}]*\\).*/\\1/p')"
+fi
+[[ "${_auth_enabled:-}" == "true" ]] && _auth_enabled="true" || _auth_enabled="false"
+  echo "OK"
 
 echo
 echo "[2/5] cria transação sem categoria (category_id=null)"
@@ -204,7 +555,7 @@ TX_CREATE="$(curl_json POST "$API/transactions" "$PAYLOAD")" || exit $?
 # se o backend respondeu erro (JSON sem .id), mostra e morre bonito
 if ! echo "$TX_CREATE" | jq -e 'has("id")' >/dev/null 2>&1; then
   echo "❌ /transactions falhou. Resposta:" >&2
-  echo "$TX_CREATE" | jq . >&2 || echo "$TX_CREATE" >&2
+echo "$TX_CREATE" | jq . >&2 || echo "$TX_CREATE" >&2
   exit 2
 fi
 
@@ -214,7 +565,7 @@ TX_CAT="$(jq -r '.category_id' <<<"$TX_CREATE")"
 [[ "$TX_ID" =~ ^[0-9]+$ ]] || die "tx_id inválido: $TX_ID"
 [[ "$TX_CAT" == "null" ]] || die "esperava category_id null ao criar, veio: $TX_CAT"
 
-echo "OK: tx_id=$TX_ID category_id=null desc="internet fibra ${SMOKE_TAG}""
+echo "OK: tx_id=$TX_ID category_id=null desc=internet fibra ${SMOKE_TAG}"
 
 echo
 echo
@@ -228,8 +579,11 @@ SUGG="$(curl_json POST "$API/ai/suggest-categories" "$PAYLOAD_SUGG")" || exit $?
   SUG_JSON="$SUGG"
 
 # valida que veio sugestão pro TX_ID
-echo "$SUGG" | jq -e --argjson tx "$TX_ID" '.items | any(.id == $tx)' >/dev/null \
-  || { echo "❌ não apareceu sugestão pro tx_id=$TX_ID"; echo "$SUGG" | jq '{period, count:(.items|length), sample:(.items[0])}'; exit 4; }
+  if ! echo "$SUGG" | jq -e --argjson tx "$TX_ID" '.items | any(.id == $tx)' >/dev/null 2>&1; then
+    echo "❌ não apareceu sugestão pro tx_id=$TX_ID"
+    echo "$SUGG" | jq '{period, count:(.items|length), sample:(.items[0] // null)}'
+    exit 4
+  fi
 
 echo "OK"
 APPLY_BODY_DRY="$(jq -nc --argjson cid "$COMPANY_ID" --arg s "$START" --arg e "$END" --argjson lim "$LIMIT" --argjson inm "$INCLUDE_NO_MATCH" '{
@@ -251,7 +605,7 @@ if [[ "$suggested" -lt 1 ]]; then
 fi
 if [[ "$has_tx" != "true" ]]; then
   echo "❌ dry_run não incluiu o TX_ID=$TX_ID nas sugestões (banco pode estar estranho)"
-  echo "$resp" | jq '{period, suggested, updated, sample:(.items[0] // null)}'
+jq '{period, suggested, updated, sample:(.items[0] // null)}' "$resp_file"
   exit 1
 fi
 
@@ -316,7 +670,10 @@ fi
 _BASE_APPLY_URL="${apply_url:-${APPLY_URL:-${API%/}/ai/suggest/apply}}"
 _IDEM_URL="${_BASE_APPLY_URL}?dry_run=true"
 
-_IDEM_RESP="$(curl -sS -X POST "${_IDEM_URL}" -H 'Content-Type: application/json' -d "${_IDEM_BODY}" || true)"
+_IDEM_RESP_file="${TMPDIR:-/tmp}/ia-cnpj__IDEM_RESP_$$.out"
+curl_auth -sS -X POST "${_IDEM_URL}" -H 'Content-Type: application/json' -d "${_IDEM_BODY}" || true >"${_IDEM_RESP_file}"
+_IDEM_RESP=""  # não carregar payload em variável (evita rc=139)
+
 _IDEM_SUG="$(echo "${_IDEM_RESP}" | jq -r 'try (.suggested // .count // (.items|length) // (.suggestions|length) // 0) catch "__BADJSON__"')"
 
 if [[ "${_IDEM_SUG}" == "__BADJSON__" ]]; then
