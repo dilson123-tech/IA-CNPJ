@@ -117,6 +117,7 @@ def _rules() -> list[dict[str, Any]]:
         {"rule": "luz|energia|celesc", "keywords": ["luz", "energia", "celesc"], "category_name": "Energia", "confidence": 0.85},
         {"rule": "agua|água|samae", "keywords": ["agua", "água", "samae"], "category_name": "Água", "confidence": 0.85},
         {"rule": "internet|wifi|provedor", "keywords": ["internet", "wifi", "provedor"], "category_name": "Internet", "confidence": 0.80},
+        {"rule": "servidor|server|hosting|vps|cloud|aws|azure|gcp|dominio|dns", "keywords": ["servidor","server","hosting","vps","cloud","aws","azure","gcp","dominio","domínio","dns"], "category_name": "Internet", "confidence": 0.78},
         {"rule": "mercado|super|padaria", "keywords": ["mercado", "super", "padaria"], "category_name": "Compras", "confidence": 0.75},
         {"rule": "combustivel|gasolina|posto", "keywords": ["combustivel", "combustível", "gasolina", "posto"], "category_name": "Combustível", "confidence": 0.80},
         {"rule": "salario|folha|pagamento", "keywords": ["salario", "salário", "folha", "pagamento"], "category_name": "Salários", "confidence": 0.80},
