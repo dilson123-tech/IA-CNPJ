@@ -122,6 +122,7 @@ def _rules() -> list[dict[str, Any]]:
         {"rule": "combustivel|gasolina|posto", "keywords": ["combustivel", "combustível", "gasolina", "posto"], "category_name": "Combustível", "confidence": 0.80},
         {"rule": "salario|folha|pagamento", "keywords": ["salario", "salário", "folha", "pagamento"], "category_name": "Salários", "confidence": 0.80},
         {"rule": "imposto|taxa|das|simples", "keywords": ["imposto", "taxa", "das", "simples"], "category_name": "Impostos", "confidence": 0.80},
+        {"rule": "teste|testes|qa|homolog|homologacao|homologação|experimento", "keywords": ["teste","testes","qa","homolog","homologacao","homologação","experimento"], "category_name": "Testes", "confidence": 0.60},
     ]
 
 def _ensure_categories_by_name(db: Session, company_id: int, names: list[str]) -> dict[str, int]:
