@@ -3,6 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+from fastapi import Body, HTTPException, Request, Response
+import httpx
+from io import BytesIO
+import json
+import os
+import datetime as _dt
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, select
 
@@ -299,3 +312,89 @@ def top_categories(
     items = sorted(items, key=key, reverse=True)[: max(1, min(limit, 20))]
 
     return TopCategoriesResponse(company_id=company_id, period=period, metric=m, items=items)
+
+
+# === AI Consult PDF (proxy do /ai/consult) ===
+_DEJAVU_TTF = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+def _pdf_font_name():
+    if os.path.exists(_DEJAVU_TTF):
+        try:
+            pdfmetrics.registerFont(TTFont("DejaVu", _DEJAVU_TTF))
+        except Exception:
+            pass
+        return "DejaVu"
+    return "Helvetica"
+
+def _build_pdf_bytes(title: str, payload: dict, consult: dict) -> bytes:
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    font = _pdf_font_name()
+    width, height = A4
+
+    c.setTitle(title)
+    c.setFont(font, 16)
+    c.drawString(20*mm, height - 20*mm, title)
+
+    c.setFont(font, 10)
+    generated_at = _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    y = height - 30*mm
+    c.drawString(20*mm, y, f"Gerado em: {generated_at}")
+    y -= 8*mm
+    c.drawString(20*mm, y, f"company_id: {payload.get('company_id')}")
+    y -= 8*mm
+    period = payload.get("period") or {}
+    c.drawString(20*mm, y, f"period: {period.get('start')} → {period.get('end')}")
+    y -= 12*mm
+
+    c.setFont(font, 9)
+    text = c.beginText(20*mm, y)
+    text.setLeading(12)
+
+    dumped = json.dumps(consult, ensure_ascii=False, indent=2)
+    for ln in dumped.splitlines():
+        if text.getY() < 20*mm:
+            c.drawText(text)
+            c.showPage()
+            c.setFont(font, 9)
+            text = c.beginText(20*mm, height - 20*mm)
+            text.setLeading(12)
+        text.textLine(ln[:180])
+
+    c.drawText(text)
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+@router.post(
+    "/ai-consult/pdf",
+    summary="Gera PDF do /ai/consult (proxy)",
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def report_ai_consult_pdf(request: Request, payload: dict = Body(...)):
+    base = str(request.base_url).rstrip("/")
+    root = request.scope.get("root_path", "") or ""
+    url = f"{base}{root}/ai/consult"
+
+    headers = {}
+    auth = request.headers.get("authorization")
+    if auth:
+        headers["authorization"] = auth
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, json=payload, headers=headers)
+
+    if r.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail={"msg": "falha ao chamar /ai/consult", "status": r.status_code, "body": r.text[:500]},
+        )
+
+    consult = r.json()
+    pdf = _build_pdf_bytes("IA-CNPJ — Relatório AI Consult", payload, consult)
+
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="ai-consult.pdf"'},
+    )
