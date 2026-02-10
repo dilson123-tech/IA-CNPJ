@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from fastapi import Body, HTTPException, Request, Response
+from fastapi import Body, Request, Response
 import httpx
 from io import BytesIO
 import json
