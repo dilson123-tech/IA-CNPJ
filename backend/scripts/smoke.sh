@@ -181,7 +181,7 @@ START="${START:-2026-01-01}"
 END="${END:-2026-01-31}"
 LIMIT="${LIMIT:-5}"
 
-TOTAL=11
+TOTAL=12
 step(){ echo; echo "[$1/$TOTAL] $2"; }
 
 fail() { echo "❌ $*"; exit 1; }
@@ -497,4 +497,47 @@ curl_auth -sS --max-time 6 -H 'Content-Type: application/json' \
 echo "OK"
 
 echo
+
+step 12 "reports ai-consult pdf (/reports/ai-consult/pdf)"
+
+# valida: HTTP 200 + content-type=application/pdf + magic %PDF
+SMOKE_AUTH_HEADER_FILE="${__hdr:-/tmp/ia_cnpj_auth_header}" python - <<'PY_PDF'
+import json, os, urllib.request
+
+base = os.environ.get("BASE", "http://127.0.0.1:8100").rstrip("/")
+prefix = os.environ.get("API_PREFIX", "")
+url = f"{base}{prefix}/reports/ai-consult/pdf"
+
+payload = {
+    "company_id": int(os.environ.get("COMPANY_ID", "1")),
+    "period": {"start": os.environ.get("START", "2026-01-01"), "end": os.environ.get("END", "2026-01-31")},
+    "dry_run": False,
+    "include_no_match": True,
+}
+
+headers = {"Content-Type": "application/json", "Accept": "application/pdf"}
+
+hdr_file = os.environ.get("SMOKE_AUTH_HEADER_FILE", "")
+if hdr_file:
+    try:
+        txt = open(hdr_file, "r", encoding="utf-8").read().strip()
+        if txt.lower().startswith("authorization:"):
+            headers["Authorization"] = txt.split(":", 1)[1].strip()
+    except FileNotFoundError:
+        pass
+
+data = json.dumps(payload).encode("utf-8")
+req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+
+with urllib.request.urlopen(req, timeout=30) as r:
+    ct = (r.headers.get("Content-Type") or "").lower()
+    head = r.read(4)
+    if r.status != 200:
+        raise SystemExit(f"FAIL pdf http={r.status}")
+    if "application/pdf" not in ct:
+        raise SystemExit(f"FAIL pdf content-type={ct}")
+    if head != b"%PDF":
+        raise SystemExit("FAIL pdf magic (não começa com %PDF)")
+print("OK pdf /reports/ai-consult/pdf")
+PY_PDF
 echo "✅ SMOKE PASS"
