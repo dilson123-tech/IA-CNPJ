@@ -126,13 +126,21 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
             top_out_pct = 0.0
 
 
+        # resumo de categorias para observabilidade (sem dados sensíveis)
+        top_cat_summary = []
+        for c in top_categories:
+            name = getattr(c, 'category_name', None) or getattr(c, 'name', '?')
+            qtd = getattr(c, 'qtd_transacoes', None)
+            top_cat_summary.append(f"{name}:{qtd}")
+        top_cat_summary_str = ",".join(top_cat_summary[:5])
+
         duration_ms = int((perf_counter() - t0) * 1000)
 
 
         logger.info(
 
 
-            "ai_consult ok request_id=%s company_id=%s start=%s end=%s duration_ms=%s qtd_tx=%s qtd_sem_categoria=%s top_out_pct=%s",
+            "ai_consult ok request_id=%s company_id=%s start=%s end=%s duration_ms=%s qtd_tx=%s qtd_sem_categoria=%s top_out_pct=%s top_cat=%s",
 
 
             request_id, payload.company_id, payload.start, payload.end, duration_ms,
@@ -145,6 +153,7 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
 
 
             top_out_pct,
+              top_cat_summary_str,
 
 
         )
