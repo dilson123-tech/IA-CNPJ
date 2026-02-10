@@ -150,15 +150,16 @@ echo "[4/4] smoke_ai_apply"
 
 echo "[5/5] smoke (inclui /ai/consult)"
 # smoke em ambiente limpo; se bash crashar (rc=139), fallback python
+: "${API:=http://${HOST:-127.0.0.1}:${PORT:-8100}}"
 set +e
-env -i BASE="${API:-http://127.0.0.1:8100}" PATH="$PATH" HOME="$HOME" LANG=C.UTF-8 LC_ALL=C.UTF-8 
-  if [[ "${SMOKE_BASH:-0}" == "1" ]]; then
-    ulimit -c 0 || true
+if [[ "${SMOKE_BASH:-0}" == "1" ]]; then
+  ulimit -c 0 || true
+  env -i BASE="$API" PATH="$PATH" HOME="$HOME" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     bash --noprofile --norc scripts/smoke.sh
-  else
-    # bash smoke segfaulta em alguns ambientes -> força fallback python
-    (exit 139)
-  fi
+else
+  # bash smoke segfaulta em alguns ambientes -> força fallback python
+  (exit 139)
+fi
 rc=$?
 set -e
 
@@ -166,12 +167,16 @@ if [[ "${rc:-0}" -eq 139 ]]; then
   if [[ "${SMOKE_BASH:-0}" == "1" ]]; then
   echo "WARN: smoke.sh segfault (rc=139); rodando fallback python..."
 else
+# 🔧 força o smoke usar o mesmo API (HOST/PORT) do dev_up
+: "${API:=http://${HOST:-127.0.0.1}:${PORT:-8100}}"
+export BASE_URL="$API"
+export BASE="$API"
   echo "[smoke] bash smoke desativado (SMOKE_BASH=0); rodando smoke python..."
 fi
   python - <<'PY_SMOKE'
 import json, os, sys, urllib.request
 
-base = os.environ.get("BASE", "http://127.0.0.1:8100").rstrip("/")
+base = (os.environ.get("BASE") or os.environ.get("BASE_URL") or os.environ.get("API") or "http://127.0.0.1:8100").rstrip("/")
 
 def get(path, timeout=8):
     req = urllib.request.Request(base + path, headers={"Accept": "application/json"})
