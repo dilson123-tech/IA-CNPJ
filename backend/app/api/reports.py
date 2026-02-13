@@ -343,7 +343,19 @@ def _build_pdf_bytes(title: str, payload: dict, consult: dict) -> bytes:
     y -= 8*mm
     c.drawString(20*mm, y, f"company_id: {payload.get('company_id')}")
     y -= 8*mm
-    period = payload.get("period") or {}
+    # compat: period{start,end} OU start/end no root; fallback consult.period
+    period = {}
+    _p = payload.get('period')
+    if isinstance(_p, dict):
+        period.update(_p)
+    if payload.get('start') and not period.get('start'):
+        period['start'] = payload.get('start')
+    if payload.get('end') and not period.get('end'):
+        period['end'] = payload.get('end')
+    if not period.get('start') and not period.get('end'):
+        _cp = consult.get('period') if isinstance(consult, dict) else None
+        if isinstance(_cp, dict) and (_cp.get('start') or _cp.get('end')):
+            period = _cp
     c.drawString(20*mm, y, f"period: {period.get('start')} → {period.get('end')}")
     y -= 12*mm
 
