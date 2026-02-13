@@ -83,7 +83,7 @@ ALEMBIC_INI="$BACKEND/alembic.ini"
 
 HOST="${HOST:-127.0.0.1}"
 BIND_HOST="${BIND_HOST:-0.0.0.0}"
-PORT="${PORT:-8100}"
+PORT="${PORT:-8110}"
 API_CNPJ="${API_CNPJ:-http://${HOST}:${PORT}}"
 UVICORN_APP="${UVICORN_APP:-app.main:app}"
 
@@ -125,7 +125,11 @@ cleanup() {
   fi
   exit $rc
 }
-trap cleanup EXIT
+if [[ "${KEEP_UVICORN:-1}" != "1" ]]; then
+  trap cleanup EXIT
+else
+  echo "[keep] uvicorn PID=$UV_PID (KEEP_UVICORN=1) — para parar: kill -TERM $UV_PID"
+fi
 
 echo "[3/4] aguardando API ficar pronta..."
 for i in $(seq 1 60); do

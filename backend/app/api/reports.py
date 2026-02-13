@@ -376,13 +376,25 @@ async def report_ai_consult_pdf(request: Request, payload: dict = Body(...)):
     root = request.scope.get("root_path", "") or ""
     url = f"{base}{root}/ai/consult"
 
+    # compat: /reports/ai-consult/pdf aceita {'period': {'start','end'}};
+    # /ai/consult espera start/end no topo.
+    payload_in = payload or {}
+    payload_consult = dict(payload_in)
+    _p = payload_consult.get('period') or {}
+    if isinstance(_p, dict):
+        if 'start' not in payload_consult and _p.get('start'):
+            payload_consult['start'] = _p.get('start')
+        if 'end' not in payload_consult and _p.get('end'):
+            payload_consult['end'] = _p.get('end')
+    payload_consult.pop('period', None)
+
     headers = {}
     auth = request.headers.get("authorization")
     if auth:
         headers["authorization"] = auth
 
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(url, json=payload, headers=headers)
+        r = await client.post(url, json=payload_consult, headers=headers)
 
     if r.status_code != 200:
         raise HTTPException(
@@ -391,7 +403,7 @@ async def report_ai_consult_pdf(request: Request, payload: dict = Body(...)):
         )
 
     consult = r.json()
-    pdf = _build_pdf_bytes("IA-CNPJ — Relatório AI Consult", payload, consult)
+    pdf = _build_pdf_bytes("IA-CNPJ — Relatório AI Consult", payload_in, consult)
 
     return Response(
         content=pdf,
