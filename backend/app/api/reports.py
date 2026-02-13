@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Body, Request, Response
 import httpx
 from io import BytesIO
-import json
 import os
 import datetime as _dt
 
@@ -359,19 +358,123 @@ def _build_pdf_bytes(title: str, payload: dict, consult: dict) -> bytes:
     c.drawString(20*mm, y, f"period: {period.get('start')} → {period.get('end')}")
     y -= 12*mm
 
+    # PDF Premium (seções) — evita dump bruto do JSON
     c.setFont(font, 9)
-    text = c.beginText(20*mm, y)
-    text.setLeading(12)
+    left = 20*mm
 
-    dumped = json.dumps(consult, ensure_ascii=False, indent=2)
-    for ln in dumped.splitlines():
+    def _new_text(ypos):
+        t = c.beginText(left, ypos)
+        t.setLeading(12)
+        return t
+
+    text = _new_text(y)
+
+    def _flush_page():
+        nonlocal text
+        c.drawText(text)
+        c.showPage()
+        c.setFont(font, 9)
+        text = _new_text(height - 20*mm)
+
+    def _line(msg=""):
+        nonlocal text
         if text.getY() < 20*mm:
-            c.drawText(text)
-            c.showPage()
-            c.setFont(font, 9)
-            text = c.beginText(20*mm, height - 20*mm)
-            text.setLeading(12)
-        text.textLine(ln[:180])
+            _flush_page()
+        msg = "" if msg is None else str(msg)
+        text.textLine(msg[:180])
+
+    def _h(title):
+        _line(title)
+        _line("-" * min(80, len(title)))
+        _line("")
+
+    def _first(d, *keys):
+        if not isinstance(d, dict):
+            return None
+        for k in keys:
+            v = d.get(k)
+            if v is not None:
+                return v
+        return None
+
+    def _money(v):
+        if v is None:
+            return "-"
+        try:
+            if isinstance(v, int):
+                cents = v
+            elif isinstance(v, float):
+                cents = int(round(v * 100))
+            elif isinstance(v, str):
+                vv = v.strip().replace(",", ".")
+                cents = int(vv) if vv.isdigit() else int(round(float(vv) * 100))
+            else:
+                cents = int(v)
+            sign = "-" if cents < 0 else ""
+            cents = abs(cents)
+            val = cents / 100.0
+            sbr = f"{val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            return f"{sign}R$ {sbr}"
+        except Exception:
+            return str(v)
+
+    data = consult if isinstance(consult, dict) else {}
+
+    _h("Resumo")
+    headline = data.get("headline")
+    if headline:
+        _line(headline)
+        _line("")
+
+    numbers = data.get("numbers") if isinstance(data.get("numbers"), dict) else {}
+    if numbers:
+        _h("Indicadores do período")
+        entradas = _first(numbers, "entradas_cents", "in_cents", "income_cents", "entradas")
+        saidas   = _first(numbers, "saidas_cents", "out_cents", "expense_cents", "saidas")
+        saldo    = _first(numbers, "saldo_cents", "balance_cents", "saldo")
+        _line(f"Entradas: {_money(entradas)}")
+        _line(f"Saídas:   {_money(saidas)}")
+        _line(f"Saldo:    {_money(saldo)}")
+        _line("")
+
+    cats = data.get("top_categories") if isinstance(data.get("top_categories"), list) else []
+    if cats:
+        _h("Top categorias (saídas)")
+        for i, ccat in enumerate(cats[:6], start=1):
+            if not isinstance(ccat, dict):
+                continue
+            name = ccat.get("category_name") or f"category_id={ccat.get('category_id')}"
+            outv = _first(ccat, "saidas_cents", "out_cents", "saidas")
+            balv = _first(ccat, "saldo_cents", "balance_cents", "saldo")
+            _line(f"{i}. {name} — saídas {_money(outv)} | saldo {_money(balv)}")
+        _line("")
+
+    def _bullets(title, items):
+        if not items:
+            return
+        _h(title)
+        for it in items[:12]:
+            _line(f"• {it}")
+        _line("")
+
+    _bullets("Insights", data.get("insights") if isinstance(data.get("insights"), list) else [])
+    _bullets("Riscos", data.get("risks") if isinstance(data.get("risks"), list) else [])
+    _bullets("Ações recomendadas", data.get("actions") if isinstance(data.get("actions"), list) else [])
+
+    txs = data.get("recent_transactions") if isinstance(data.get("recent_transactions"), list) else []
+    if txs:
+        _h("Transações recentes (amostra)")
+        for tx in txs[:10]:
+            if not isinstance(tx, dict):
+                continue
+            dte = tx.get("date") or tx.get("created_at") or ""
+            desc = tx.get("description") or tx.get("memo") or ""
+            amt = _first(tx, "amount_cents", "value_cents", "amount", "value")
+            _line(f"- {dte} | {_money(amt)} | {desc}")
+        _line("")
+
+    _h("Anexo técnico (campos)")
+    _line(", ".join(sorted(data.keys())))
 
     c.drawText(text)
     c.showPage()
