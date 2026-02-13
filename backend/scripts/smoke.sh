@@ -515,8 +515,56 @@ payload = {
     "include_no_match": True,
 }
 
+# auth-aware headers (respeita AUTH_ENABLED)
+
+import os, json
+
+from urllib.request import Request, urlopen
+
+from urllib.error import HTTPError
+
+
 headers = {"Content-Type": "application/json", "Accept": "application/pdf"}
 
+auth_enabled = os.getenv("AUTH_ENABLED", "").lower() in ("1","true","yes","on")
+
+if auth_enabled:
+
+    user = os.getenv("AUTH_USERNAME", "dev")
+
+    pw = os.getenv("AUTH_PASSWORD") or os.getenv("AUTH_PLAIN_PASSWORD") or "dev"
+
+    payload_login = json.dumps({"username": user, "password": pw}).encode("utf-8")
+
+
+    token = None
+
+    for login_url in (f"{base}{prefix}/auth/login", f"{base}/auth/login"):
+
+        try:
+
+            req = Request(login_url, data=payload_login, headers={"Content-Type": "application/json"})
+
+            with urlopen(req, timeout=20) as r:
+
+                body = r.read().decode("utf-8")
+
+            token = json.loads(body).get("access_token")
+
+            if token:
+
+                break
+
+        except HTTPError:
+
+            pass
+
+
+    if not token:
+
+        raise SystemExit("FAIL auth: AUTH_ENABLED=true mas não consegui obter access_token")
+
+    headers["Authorization"] = f"Bearer {token}"
 hdr_file = os.environ.get("SMOKE_AUTH_HEADER_FILE", "")
 if hdr_file:
     try:
