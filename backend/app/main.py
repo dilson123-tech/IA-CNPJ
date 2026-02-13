@@ -65,6 +65,29 @@ def health():
 @app.get("/openapi.json", include_in_schema=False, dependencies=DOC_DEPS)
 def openapi_json():
     schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+
+    # --- OpenAPI hardening: expor Bearer JWT como security scheme ---
+    comps = schema.setdefault('components', {})
+    schemes = comps.setdefault('securitySchemes', {})
+    schemes.setdefault('bearerAuth', {
+        'type': 'http',
+        'scheme': 'bearer',
+        'bearerFormat': 'JWT',
+    })
+
+    # Rotas públicas: não exigem token (no schema)
+    public_paths = {'/auth/login', '/health'}
+
+    # Aplica security no schema para operações protegidas
+    for path, ops in (schema.get('paths') or {}).items():
+        if path in public_paths:
+            continue
+        for method, op in (ops or {}).items():
+            if not isinstance(op, dict):
+                continue
+            # Não sobrescreve se já existir
+            op.setdefault('security', [{'bearerAuth': []}])
+
     return JSONResponse(schema)
 
 
