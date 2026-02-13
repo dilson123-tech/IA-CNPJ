@@ -690,3 +690,67 @@ fi
 
 echo "OK (idempotência): suggested=0"
 echo "✅ SMOKE PASS (TX_ID=$TX_ID category_id=$TX_CAT)"
+
+
+# smoke 09b reports ai-consult pdf
+echo "[$(date +%H:%M:%S)] smoke 09b reports ai-consult pdf"
+
+base="${BASE_API:-${BASE:-}}"
+auth="${AUTH_HDR:-${AUTH:-}}"
+
+if [ -z "$base" ]; then
+  echo "smoke: BASE_API/BASE vazio"
+  exit 2
+fi
+if [ -z "$auth" ]; then
+  echo "smoke: AUTH_HDR/AUTH vazio"
+  exit 2
+fi
+
+pdf="/tmp/ci_smoke_09b_ai_consult.pdf"
+hdr="/tmp/ci_smoke_09b_ai_consult.hdr"
+
+company_id="${SMOKE_COMPANY_ID:-1}"
+start="${SMOKE_START:-2026-02-01}"
+end="${SMOKE_END:-2026-02-28}"
+question="${SMOKE_QUESTION:-quais foram meus maiores gastos no período? tem recorrência e pico?}"
+
+payload_json="$(
+  jq -n \
+    --argjson company_id "$company_id" \
+    --arg start "$start" \
+    --arg end "$end" \
+    --arg question "$question" \
+    '{company_id:$company_id,start:$start,end:$end,limit:20,question:$question}'
+)"
+
+curl -sS -D "$hdr" -o "$pdf" \
+  -X POST "$base/reports/ai-consult/pdf" \
+  -H "$auth" \
+  -H "Content-Type: application/json" \
+  -d "$payload_json"
+
+head -n 1 "$hdr" | rg -q " 200 " || {
+  echo "smoke: HTTP != 200"
+  sed -n '1,40p' "$hdr"
+  exit 1
+}
+
+rg -ni '^content-type:\s*application/pdf' "$hdr" >/dev/null || {
+  echo "smoke: expected content-type application/pdf"
+  sed -n '1,40p' "$hdr"
+  exit 1
+}
+
+python - "$pdf" <<'PY2'
+import os, sys
+p = sys.argv[1]
+with open(p, "rb") as f:
+    magic = f.read(4)
+if magic != b"%PDF":
+    raise SystemExit(f"smoke: not a pdf (magic={magic!r})")
+size = os.path.getsize(p)
+if size < 2000:
+    raise SystemExit(f"smoke: pdf too small (size={size})")
+print("smoke: ai-consult pdf OK ✅")
+PY2
