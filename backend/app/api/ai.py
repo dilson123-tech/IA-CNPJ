@@ -7,9 +7,11 @@ import logging
 from uuid import uuid4
 from time import perf_counter
 
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import select, func, case
 
 from app.db import get_db
 from app.schemas.ai import AISuggestCategoriesRequest, AISuggestCategoriesResponse
@@ -19,6 +21,8 @@ from app.schemas.reports import Totals
 from app.api import reports as rep
 from app.api.transaction import suggest_categories
 from app.api.transaction import apply_suggestions as tx_apply_suggestions
+
+from app.models.transaction import Transaction
 
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -52,6 +56,122 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
             db=db,
         )
 
+        # -----------------------------
+        # Motor v1: diagnóstico mais forte (sem mudar o schema)
+        # - top saídas por categoria (percentual)
+        # - top despesas por descrição (onde está sangrando)
+        # - recorrência (assinaturas / repetidas)
+        # - comparação com período anterior (mesma duração)
+        # -----------------------------
+        def _norm_desc(s: str) -> str:
+            s = (s or "").strip().lower()
+            s = re.sub(r"\s+", " ", s)
+            s = s.replace("-", " ").replace("_", " ")
+            s = re.sub(r"\s+", " ", s).strip()
+            return s[:60] if len(s) > 60 else s
+
+        # comparação com período anterior (mesmo número de dias)
+        try:
+            days = (end_dt.date() - start_dt.date()).days + 1
+            prev_end = start_dt.date() - timedelta(days=1)
+            prev_start = prev_end - timedelta(days=days - 1)
+
+            prev_start_dt = datetime(prev_start.year, prev_start.month, prev_start.day, 0, 0, 0)
+            prev_end_dt = datetime(prev_end.year, prev_end.month, prev_end.day, 23, 59, 59, 999999)
+
+            totals_prev: Totals = rep._totals_row(db, payload.company_id, prev_start_dt, prev_end_dt)
+            prev_saidas = int(getattr(totals_prev, "saidas_cents", 0) or 0)
+            prev_entradas = int(getattr(totals_prev, "entradas_cents", 0) or 0)
+        except Exception:
+            totals_prev = None
+            prev_saidas = 0
+            prev_entradas = 0
+
+        # top saídas por categoria (percentual)
+        by_out = sorted(by_cat or [], key=lambda c: int(getattr(c, "saidas_cents", 0) or 0), reverse=True)
+        top_out_cats = [c for c in by_out if int(getattr(c, "saidas_cents", 0) or 0) > 0][:3]
+
+        # top despesas por descrição (PERÍODO INTEIRO, só "out")
+        desc_raw = func.coalesce(Transaction.description, "")
+        desc_key = func.lower(func.trim(desc_raw))
+        desc_key = case((desc_key == "", "(sem descrição)"), else_=desc_key)
+
+        q_desc = (
+            select(
+                desc_key.label('k'),
+                func.sum(Transaction.amount_cents).label('sum_cents'),
+                func.count(Transaction.id).label('cnt'),
+                func.max(desc_raw).label('sample'),
+            )
+            .where(
+                Transaction.company_id == payload.company_id,
+                Transaction.occurred_at.is_not(None),
+                Transaction.occurred_at >= start_dt,
+                Transaction.occurred_at <= end_dt,
+                Transaction.kind == 'out',
+            )
+            .group_by(desc_key)
+            .order_by(func.sum(Transaction.amount_cents).desc())
+            .limit(5)
+        )
+
+        rows_desc = db.execute(q_desc).all()
+        top_desc = []
+        for r in rows_desc:
+            sample = (getattr(r, 'sample', '') or getattr(r, 'k', '') or '(sem descrição)').strip()
+            top_desc.append({'sample': sample[:80], 'sum': int(getattr(r, 'sum_cents', 0) or 0), 'cnt': int(getattr(r, 'cnt', 0) or 0)})
+
+        # recorrência: mesma descrição >=2 e soma >= R$10,00 (1000 cents)
+        q_rec = (
+            select(
+                desc_key.label('k'),
+                func.sum(Transaction.amount_cents).label('sum_cents'),
+                func.count(Transaction.id).label('cnt'),
+                func.max(desc_raw).label('sample'),
+            )
+            .where(
+                Transaction.company_id == payload.company_id,
+                Transaction.occurred_at.is_not(None),
+                Transaction.occurred_at >= start_dt,
+                Transaction.occurred_at <= end_dt,
+                Transaction.kind == 'out',
+            )
+            .group_by(desc_key)
+            .having(func.count(Transaction.id) >= 2)
+            .order_by(func.sum(Transaction.amount_cents).desc())
+            .limit(3)
+        )
+
+        rows_rec = db.execute(q_rec).all()
+        recurring = []
+        for r in rows_rec:
+            s = (getattr(r, 'sample', '') or getattr(r, 'k', '') or '(sem descrição)').strip()
+            s_sum = int(getattr(r, 'sum_cents', 0) or 0)
+            s_cnt = int(getattr(r, 'cnt', 0) or 0)
+            if s_cnt >= 2 and s_sum >= 1000:
+                recurring.append({'sample': s[:80], 'sum': s_sum, 'cnt': s_cnt})
+
+        # maior gasto único no período (pico)
+        q_single = (
+            select(desc_raw.label('description'), Transaction.amount_cents.label('amount_cents'))
+            .where(
+                Transaction.company_id == payload.company_id,
+                Transaction.occurred_at.is_not(None),
+                Transaction.occurred_at >= start_dt,
+                Transaction.occurred_at <= end_dt,
+                Transaction.kind == 'out',
+            )
+            .order_by(Transaction.amount_cents.desc())
+            .limit(1)
+        )
+
+        r_single = db.execute(q_single).first()
+        top_single_desc = None
+        top_single_amt = 0
+        if r_single:
+            top_single_desc = (getattr(r_single, 'description', '') or '(sem descrição)').strip()
+            top_single_amt = int(getattr(r_single, 'amount_cents', 0) or 0)
+
         entradas = totals.entradas_cents
         saidas = totals.saidas_cents
         saldo = totals.saldo_cents
@@ -84,6 +204,86 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
                 top = by_cat[0]
                 insights.append(f"Categoria com maior volume: {top.category_name} (saldo {_fmt_brl(top.saldo_cents)}).")
 
+
+
+            # top saídas por categoria (com percentual)
+
+            if saidas > 0 and top_out_cats:
+
+                parts = []
+
+                for c in top_out_cats:
+
+                    oc = int(getattr(c, "saidas_cents", 0) or 0)
+
+                    pct = round((oc / saidas) * 100.0, 1) if saidas > 0 else 0.0
+
+                    parts.append(f"{getattr(c, 'category_name', '?')} {pct:.1f}%")
+
+                insights.append("Principais saídas por categoria: " + " | ".join(parts) + ".")
+
+
+                # risco: concentração alta numa categoria
+
+                c0 = top_out_cats[0]
+
+                c0_out = int(getattr(c0, "saidas_cents", 0) or 0)
+
+                c0_pct = (c0_out / saidas) * 100.0 if saidas > 0 else 0.0
+
+                if c0_pct >= 45.0:
+
+                    risks.append(f"Alta concentração de despesas em {getattr(c0, 'category_name', '?')} (~{c0_pct:.0f}% das saídas).")
+
+                    actions.append("Quebre essa categoria em subcategorias e defina teto (limite) semanal/mensal.")
+
+
+            # onde está gastando mais (por descrição, do contexto recente)
+
+            if top_desc:
+
+                for i, v in enumerate(top_desc[:3], start=1):
+
+                    insights.append(f"Top gasto #{i} por descrição: {v['sample']} — {_fmt_brl(int(v['sum']))} ({int(v['cnt'])}x).")
+
+                if len(top_desc) > 3:
+
+                    insights.append("Há mais gastos relevantes por descrição (top 5) — vale abrir o PDF e ver a lista completa.")
+
+
+            # recorrência (assinaturas / cobranças repetidas)
+
+            if recurring:
+
+                risks.append("Detectei despesas recorrentes (mesma descrição repetida) — possível assinatura/cobrança automática.")
+
+                for v in recurring[:2]:
+
+                    actions.append(f"Revise: {v['sample']} — {_fmt_brl(int(v['sum']))} em {int(v['cnt'])} ocorrências.")
+
+
+            # pico (maior gasto único)
+            if int(top_single_amt or 0) > 0:
+                pct = (int(top_single_amt) / saidas) * 100.0 if saidas > 0 else 0.0
+                if int(top_single_amt) >= 50000 or pct >= 25.0:
+                    risks.append(f"Gasto alto único: {(top_single_desc or '(sem descrição)')[:70]} — {_fmt_brl(int(top_single_amt))}.")
+                    actions.append("Valide esse gasto (nota/recibo). Se for recorrente, renegocie ou troque fornecedor.")
+            # comparação com período anterior
+
+            if totals_prev is not None and (prev_saidas > 0 or prev_entradas > 0):
+
+                if prev_saidas > 0:
+
+                    delta = ((saidas - prev_saidas) / prev_saidas) * 100.0
+
+                    insights.append(f"Comparativo: saídas {delta:+.1f}% vs período anterior (mesma duração).")
+
+                    if delta >= 20.0:
+
+                        risks.append("Saídas aumentaram forte vs período anterior — possível descontrole ou despesa extraordinária.")
+
+                        actions.append("Compare transações do topo (descrição) entre os dois períodos e identifique o motivo do salto.")
+
             # sem categoria
             semcat = next((c for c in by_cat if c.category_id is None), None)
             if semcat and semcat.qtd_transacoes >= 2:
@@ -99,12 +299,143 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
             if payload.question:
                 insights.append(f"Pergunta recebida: {payload.question}")
 
+
+        # -----------------------------
+
+        # Motor v2: Health Score (0-100) + Status (sem mudar schema)
+
+        # Regras determinísticas e auditáveis:
+
+        # - penaliza burn, saldo negativo, sem entradas, sem categoria, concentração, recorrência, picos e aumento vs período anterior
+
+        # -----------------------------
+
+        def _clamp(n: int, lo: int = 0, hi: int = 100) -> int:
+
+            return lo if n < lo else hi if n > hi else n
+
+        
+
+        score = 100
+
+        
+
+        # Base: saldo e atividade
+
+        if saidas > 0 and entradas == 0:
+
+            score -= 25  # gastando sem registrar receita
+
+        if saldo < 0:
+
+            score -= 10
+
+        
+
+        # Burn
+
+        if entradas > 0 and saidas > entradas:
+
+            score -= 15
+
+        
+
+        # Sem categoria (qualidade do dado)
+
+        if semcat and int(getattr(semcat, "qtd_transacoes", 0) or 0) >= 2:
+
+            score -= 10
+
+        
+
+        # Concentração por categoria (já calculada no v1)
+
+        try:
+
+            if "top_out_cats" in locals() and saidas > 0 and top_out_cats:
+
+                c0 = top_out_cats[0]
+
+                c0_out = int(getattr(c0, "saidas_cents", 0) or 0)
+
+                c0_pct = (c0_out / saidas) * 100.0 if saidas > 0 else 0.0
+
+                if c0_pct >= 45.0:
+
+                    score -= 10
+
+        except Exception:
+
+            pass
+
+        
+
+        # Recorrência / picos
+
+        if "recurring" in locals() and recurring:
+
+            score -= 5
+
+        top_single = locals().get("top_single")
+
+        if top_single is not None:
+            top_amt = int(getattr(top_single, "amount_cents", 0) or 0)
+
+            pct = (top_amt / saidas) * 100.0 if saidas > 0 else 0.0
+
+            if top_amt >= 50000 or pct >= 25.0:
+
+                score -= 5
+
+        
+
+        # Comparativo vs período anterior (se disponível)
+
+        try:
+
+            if totals_prev is not None and prev_saidas > 0:
+
+                delta = ((saidas - prev_saidas) / prev_saidas) * 100.0
+
+                if delta >= 20.0:
+
+                    score -= 10
+
+        except Exception:
+
+            pass
+
+        
+
+        score = _clamp(int(score))
+
+        status = "SAUDÁVEL" if score >= 80 else "ATENÇÃO" if score >= 60 else "CRÍTICO"
+
+        insights.insert(0, f"Saúde financeira (score {score}/100): {status}.")
+
+        
+
+        if status == "CRÍTICO":
+
+            actions.insert(0, "Ação imediata: reduza saídas, categorize tudo e registre entradas; revise top gastos e recorrências.")
+
+        elif status == "ATENÇÃO":
+
+            actions.insert(0, "Ajuste recomendado: defina teto por categoria e revise recorrências/picos; melhore qualidade das categorias.")
+
+
         # top categories (limita)
         top_categories = by_cat[:8]
 
+        # Motor v2: garante score/status como primeiro insight (sem mudar schema)
+        try:
+            idx = next(i for i, s in enumerate(insights) if str(s).lower().startswith("saúde financeira"))
+            if idx != 0:
+                insights.insert(0, insights.pop(idx))
+        except StopIteration:
+            pass
+
         # observabilidade mínima (sem dados sensíveis)
-
-
         semcat = next((c for c in by_cat if getattr(c, 'category_id', None) is None), None)
 
 
