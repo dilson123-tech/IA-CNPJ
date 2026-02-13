@@ -7,8 +7,7 @@ import logging
 from uuid import uuid4
 from time import perf_counter
 
-from datetime import datetime, timedelta, date, timezone
-from collections import defaultdict
+from datetime import datetime, timedelta
 import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -377,8 +376,9 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
 
             score -= 5
 
-        if "top_single" in locals() and top_single is not None:
+        top_single = locals().get("top_single")
 
+        if top_single is not None:
             top_amt = int(getattr(top_single, "amount_cents", 0) or 0)
 
             pct = (top_amt / saidas) * 100.0 if saidas > 0 else 0.0
