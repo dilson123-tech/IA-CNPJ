@@ -129,7 +129,12 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
 
-      - name: Smoke (make dev)
+      - name: Install deps (smoke job)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+      - name: Smoke (uvicorn + scripts/smoke.sh)
         env:
           DATABASE_URL: sqlite:////tmp/ia_cnpj_ci.db
           IA_CNPJ_ENV: lab
@@ -148,12 +153,34 @@ jobs:
           # sanity: bash filho herda xtrace via SHELLOPTS
           bash --noprofile --norc -c '[[ $- == *x* ]] && echo "xtrace inherited ✅"'
 
-          make dev |& tee /tmp/ci_smoke.log
+          # sobe API (background) no mesmo job/env
+          (cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8100) > /tmp/ci_api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" || true' EXIT
+
+          # espera /health (determinístico)
+          python - <<'PY_WAIT'
+          import time, urllib.request
+          base='http://127.0.0.1:8100'
+          for i in range(45):
+              try:
+                  with urllib.request.urlopen(base + '/health', timeout=2) as r:
+                      if r.status == 200:
+                          print('api up ✅')
+                          break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit('FAIL: API não subiu em /health')
+          PY_WAIT
+
+          # roda smoke real (Master2)
+          (cd backend && BASE="http://127.0.0.1:8100" bash scripts/smoke.sh) |& tee /tmp/ci_smoke.log
 
           # segurança: NÃO pode vazar header Authorization nem JWT (prefixo eyJhbGci)
-          if grep -nE 'Authorization: Bearer|eyJhbGci' /tmp/ci_smoke.log; then
-            echo "❌ SECURITY: token vazou no log sob xtrace"
+          if grep -nE 'Authorization: Bearer|eyJhbGci' /tmp/ci_smoke.log /tmp/ci_api.log; then
+            echo '❌ SECURITY: token vazou no log sob xtrace'
             exit 1
           fi
 
-          echo "✅ OK: não vazou token sob xtrace"
+          echo '✅ OK: não vazou token sob xtrace'
