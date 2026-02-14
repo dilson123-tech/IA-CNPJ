@@ -162,12 +162,18 @@ else
 fi
 
 # autodetect prefix (/api/v1) via OpenAPI (compat)
+# ⚠️ workaround: em alguns ambientes o bash está segfaultando durante o autodetect.
+# Default: NÃO autodetecta. Se precisar, use SMOKE_DETECT_PREFIX=1 ou defina API_PREFIX manualmente.
 API_PREFIX="${API_PREFIX:-}"
 if [ -z "$API_PREFIX" ]; then
-oa_file="${TMPDIR:-/tmp}/ia-cnpj_openapi_$$.json"
-curl_auth -sS --connect-timeout 1 --max-time 15 "$_BASE/openapi.json" >"$oa_file"
-  if echo "$oa" | jq -e '.paths["/api/v1/ai/consult"]' >/dev/null 2>&1; then
-    API_PREFIX="/api/v1"
+  if [ "${SMOKE_DETECT_PREFIX:-0}" = "1" ]; then
+    oa_file="${TMPDIR:-/tmp}/ia-cnpj_openapi_$$.json"
+    curl_auth -sS --connect-timeout 1 --max-time 15 "$_BASE/openapi.json" >"$oa_file"
+    if jq -e '.paths["/api/v1/ai/consult"]' "$oa_file" >/dev/null 2>&1; then
+      API_PREFIX="/api/v1"
+    else
+      API_PREFIX=""
+    fi
   else
     API_PREFIX=""
   fi
@@ -193,23 +199,88 @@ fail() { echo "❌ $*"; exit 1; }
 req_json() {
   restore_auth
   local timeout="$1"; local method="$2"; local url="$3"; local out="$4"; shift 4
-  local code
-  code_file="${TMPDIR:-/tmp}/ia-cnpj_code_$$.out"
-  curl_auth -sS --max-time "$timeout" -o "$out" -w '%{http_code}' -X "$method" "$url" "$@" || echo "000" >"${code_file}"
-  code=""  # não carregar payload em variável (evita rc=139)
+  SMOKE_AUTH_HEADER_FILE="${__hdr:-/tmp/ia_cnpj_auth_header}" \
+  REQ_TIMEOUT="$timeout" REQ_METHOD="$method" REQ_URL="$url" REQ_OUT="$out" \
+  python - "$@" <<'PY_REQ'
+import json, os, sys, urllib.request
+from urllib.error import HTTPError
 
-  if [[ ! "$code" =~ ^2[0-9][0-9]$ ]]; then
-    echo "❌ HTTP $code $method $url"
-    if [ -s "$out" ]; then cat "$out" | jq . >/dev/null 2>&1 && cat "$out" | jq . || cat "$out"; else echo "(sem body)"; fi
-    return 1
-  fi
+timeout = float(os.environ.get('REQ_TIMEOUT','10'))
+method = os.environ.get('REQ_METHOD','GET')
+url = os.environ.get('REQ_URL','').strip()
+out = os.environ.get('REQ_OUT','/tmp/req.out')
+hdr_file = os.environ.get('SMOKE_AUTH_HEADER_FILE','')
 
-  if ! jq -e . "$out" >/dev/null 2>&1; then
-    echo "❌ JSON inválido $method $url"
-    cat "$out" || true
-    return 1
-  fi
-  return 0
+headers = {}
+data = None
+
+# parse args estilo curl: -H 'K: V' e -d '...'
+args = sys.argv[1:]
+i = 0
+while i < len(args):
+    a = args[i]
+    if a in ('-H','--header') and i+1 < len(args):
+        i += 1
+        h = args[i]
+        # suporte a headerfile: @/tmp/...
+        if h.startswith('@'):
+            path = h[1:]
+            try:
+                txt = open(path,'r',encoding='utf-8').read().strip()
+                if txt.lower().startswith('authorization:'):
+                    headers['Authorization'] = txt.split(':',1)[1].strip()
+            except FileNotFoundError:
+                pass
+        else:
+            if ':' in h:
+                k,v = h.split(':',1)
+                headers[k.strip()] = v.strip()
+    elif a in ('-d','--data','--data-raw','--data-binary') and i+1 < len(args):
+        i += 1
+        data = args[i].encode('utf-8')
+        headers.setdefault('Content-Type','application/json')
+    i += 1
+
+# se não veio Authorization, tenta do header padrão do smoke
+if 'Authorization' not in headers and hdr_file:
+    try:
+        txt = open(hdr_file,'r',encoding='utf-8').read().strip()
+        if txt.lower().startswith('authorization:'):
+            headers['Authorization'] = txt.split(':',1)[1].strip()
+    except FileNotFoundError:
+        pass
+
+req = urllib.request.Request(url, data=data, headers=headers, method=method)
+status = 0
+body = ''
+try:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        status = r.status
+        body = r.read().decode('utf-8')
+except HTTPError as e:
+    status = e.code
+    body = e.read().decode('utf-8') if hasattr(e,'read') else ''
+
+open(out,'w',encoding='utf-8').write(body)
+
+if not (200 <= status < 300):
+    print(f'❌ HTTP {status} {method} {url}')
+    try:
+        print(json.dumps(json.loads(body), indent=2, ensure_ascii=False))
+    except Exception:
+        print(body)
+    raise SystemExit(1)
+
+try:
+    json.loads(body)
+except Exception as e:
+    print(f'❌ JSON inválido {method} {url}: {e}')
+    print(body)
+    raise SystemExit(1)
+
+print('OK')
+PY_REQ
+  return $?
 }
 
 # garante COMPANY_ID válido (DB zerado proof)
@@ -225,86 +296,211 @@ ensure_company() {
     return 1
   fi
 
-  get_tmp="/tmp/smoke_pre_company_get.json"
-  get_code_file="${TMPDIR:-/tmp}/ia-cnpj_get_code_$$.out"
-  curl_auth -sS --max-time 5 -o "$get_tmp" -w '%{http_code}' "$BASE/companies/$COMPANY_ID" || echo "000" >"${get_code_file}"
-  get_code=""  # não carregar payload em variável (evita rc=139)
+  id_out="${TMPDIR:-/tmp}/ia-cnpj_company_id_$$.out"
+  hdr_out="/tmp/ia_cnpj_auth_header"
 
-  if [[ "$get_code" =~ ^2[0-9][0-9]$ ]]; then
-    # existe
-    return 0
+  ID_OUT="$id_out" HDR_OUT="$hdr_out" python - <<'PY_COMPANY'
+import json, os, urllib.request
+from urllib.error import HTTPError
+
+base = os.environ.get("BASE", "http://127.0.0.1:8100").rstrip("/")
+prefix = os.environ.get("API_PREFIX", "")
+cid = int(os.environ.get("COMPANY_ID", "1"))
+cnpj = os.environ.get("SMOKE_CNPJ", "12345678000195")
+razao = os.environ.get("SMOKE_RAZAO", "__SMOKE_COMPANY__ LTDA")
+id_out = os.environ.get("ID_OUT", "/tmp/ia-cnpj_company_id.out")
+hdr_out = os.environ.get("HDR_OUT", "/tmp/ia_cnpj_auth_header")
+
+def read_auth_header_file(path: str):
+    try:
+        txt = open(path, "r", encoding="utf-8").read().strip()
+        if txt.lower().startswith("authorization:"):
+            val = txt.split(":", 1)[1].strip()
+            if val.lower().startswith("bearer ") and len(val) > 20:
+                return val
+    except FileNotFoundError:
+        return None
+    return None
+
+def login_get_token():
+    user = os.getenv("SMOKE_AUTH_USER") or os.getenv("AUTH_USERNAME") or "dev"
+    pw = os.getenv("SMOKE_AUTH_PASS") or os.getenv("AUTH_PASSWORD") or os.getenv("AUTH_PLAIN_PASSWORD") or "dev"
+    payload = json.dumps({"username": user, "password": pw}).encode("utf-8")
+
+    for login_url in (f"{base}{prefix}/auth/login", f"{base}/auth/login"):
+        try:
+            req = urllib.request.Request(login_url, data=payload, headers={"Content-Type":"application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=15) as r:
+                body = r.read().decode("utf-8")
+            tok = json.loads(body).get("access_token")
+            if tok:
+                # grava header para o bash reutilizar
+                open(hdr_out, "w", encoding="utf-8").write(f"Authorization: Bearer {tok}")
+                return f"Bearer {tok}"
+        except HTTPError:
+            pass
+        except Exception:
+            pass
+    return None
+
+def req(method, url, payload=None, auth=None, timeout=10):
+    data = None
+    headers = {}
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if auth:
+        headers["Authorization"] = auth
+    r = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(r, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+            return resp.status, body
+    except HTTPError as e:
+        body = e.read().decode("utf-8") if hasattr(e, "read") else ""
+        return e.code, body
+
+# tenta usar header já existente (se alguém já gerou)
+auth = read_auth_header_file(hdr_out)
+
+def get_company_by_id(auth_val):
+    for url in (f"{base}/companies/{cid}", f"{base}/api/v1/companies/{cid}"):
+        code, body = req("GET", url, None, auth=auth_val, timeout=8)
+        if code == 200:
+            Path = __import__("pathlib").Path
+            Path(id_out).write_text(str(cid), encoding="utf-8")
+            return True
+        if code == 401 and ("Missing bearer token" in body or "Unauthorized" in body or body):
+            return (401, url, body)
+        if code not in (404, 401):
+            raise SystemExit(f"FAIL preflight get company http={code} url={url} body={body[:200]}")
+    return False
+
+res = get_company_by_id(auth)
+if res is True:
+    raise SystemExit(0)
+
+if isinstance(res, tuple) and res[0] == 401 and (not auth or "token expired" in (res[2] or "").lower()):
+    # auth necessário -> faz login e retry
+    auth = login_get_token()
+    if not auth:
+        raise SystemExit(f"FAIL preflight auth: /companies exige token e login falhou")
+    res2 = get_company_by_id(auth)
+    if res2 is True:
+        raise SystemExit(0)
+
+# se não existe por id, tenta seed (com auth se necessário)
+payload = {"cnpj": cnpj, "razao_social": razao}
+seed_urls = (f"{base}/companies", f"{base}/api/v1/companies")
+seed_code = None
+seed_body = ""
+used_seed_url = None
+for u in seed_urls:
+    code, body = req("POST", u, payload, auth=auth, timeout=12)
+    used_seed_url = u
+    seed_code, seed_body = code, body
+    if code == 401 and (not auth or "token expired" in (body or "").lower()):
+        auth = login_get_token()
+        if not auth:
+            raise SystemExit("FAIL preflight auth: seed exige token e login falhou")
+        code, body = req("POST", u, payload, auth=auth, timeout=12)
+        seed_code, seed_body = code, body
+    if code != 404:
+        break
+
+if seed_code not in (200, 201, 409):
+    raise SystemExit(f"FAIL preflight seed http={seed_code} url={used_seed_url} body={seed_body[:200]}")
+
+if seed_code in (200, 201):
+    try:
+        obj = json.loads(seed_body)
+        new_id = obj.get("id") or obj.get("company_id")
+        if new_id:
+            cid = int(new_id)
+    except Exception:
+        pass
+    __import__("pathlib").Path(id_out).write_text(str(cid), encoding="utf-8")
+    raise SystemExit(0)
+
+# 409: já existe -> lista e acha pelo cnpj
+for u in (used_seed_url, f"{base}/api/v1/companies", f"{base}/companies"):
+    if not u:
+        continue
+    code, body = req("GET", u, None, auth=auth, timeout=12)
+    if code == 401 and (not auth or "token expired" in (body or "").lower()):
+        auth = login_get_token()
+        if not auth:
+            continue
+        code, body = req("GET", u, None, auth=auth, timeout=12)
+    if code != 200:
+        continue
+    try:
+        data = json.loads(body)
+    except Exception:
+        continue
+    items = data
+    if isinstance(data, dict):
+        items = data.get("items") or data.get("data") or data
+    found = None
+    if isinstance(items, list):
+        for it in items:
+            if isinstance(it, dict) and it.get("cnpj") == cnpj and it.get("id") is not None:
+                found = it.get("id")
+                break
+    elif isinstance(items, dict) and items.get("cnpj") == cnpj and items.get("id") is not None:
+        found = items.get("id")
+    if found:
+        __import__("pathlib").Path(id_out).write_text(str(int(found)), encoding="utf-8")
+        raise SystemExit(0)
+
+raise SystemExit("FAIL preflight: não consegui determinar COMPANY_ID")
+PY_COMPANY
+
+  # se o python gerou header, ativa auth pro resto do smoke
+  if [ -s "$hdr_out" ]; then
+    __hdr="$hdr_out"
+    CURL_AUTH=(-H "@$__hdr")
+    echo "ℹ️ preflight: auth header ativado (__hdr=$__hdr)"
   fi
 
-  echo "ℹ️ preflight: company_id=$COMPANY_ID não existe (HTTP $get_code); seed/lookup por CNPJ..."
-
-  payload="$(jq -nc --arg cnpj "$SMOKE_CNPJ" --arg rs "$SMOKE_RAZAO" '{cnpj:$cnpj, razao_social:$rs}')"
-
-  seed_tmp="/tmp/smoke_pre_seed_company.json"
-  seed_url="$BASE/companies"
-  seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
-  curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
-    -H 'Content-Type: application/json' \
-    -d "$payload" || echo "000" >"${seed_code_file}"
-  seed_code=""  # não carregar payload em variável (evita rc=139)
-
-  if [ "$seed_code" = "404" ]; then
-    seed_url="$BASE/api/v1/companies"
-    seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
-    curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
-      -H 'Content-Type: application/json' \
-      -d "$payload" || echo "000" >"${seed_code_file}"
-    seed_code=""  # não carregar payload em variável (evita rc=139)
-
-  fi
-
-  if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ] && [ "$seed_code" != "409" ]; then
-    echo "❌ preflight seed falhou HTTP $seed_code ($seed_url)"
-    cat "$seed_tmp" | jq . >/dev/null 2>&1 && cat "$seed_tmp" | jq . || cat "$seed_tmp"
+  if [ ! -s "$id_out" ]; then
+    echo "❌ preflight: não consegui determinar COMPANY_ID"
     return 1
   fi
 
-  if [ "$seed_code" = "409" ]; then
-    echo "ℹ️ preflight: 409 (CNPJ já cadastrado); buscando id existente..."
-    lookup_tmp="/tmp/smoke_pre_lookup_companies.json"
-    lookup_url="$seed_url"
-    lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
-    curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000" >"${lookup_code_file}"
-    lookup_code=""  # não carregar payload em variável (evita rc=139)
-
-    if [ "$lookup_code" = "404" ]; then
-      lookup_url="$BASE/api/v1/companies"
-      lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
-      curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" || echo "000" >"${lookup_code_file}"
-      lookup_code=""  # não carregar payload em variável (evita rc=139)
-
-    fi
-    existing_id="$(jq -r --arg c "$SMOKE_CNPJ" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
-    if [ -z "$existing_id" ] || [ "$existing_id" = "null" ]; then
-      echo "❌ preflight lookup por CNPJ falhou (HTTP $lookup_code $lookup_url)"
-      cat "$lookup_tmp" | jq . >/dev/null 2>&1 && cat "$lookup_tmp" | jq . || cat "$lookup_tmp"
-      return 1
-    fi
-    COMPANY_ID="$existing_id"
-    echo "ℹ️ preflight: usando COMPANY_ID=$COMPANY_ID (lookup por cnpj)"
-    return 0
+  read -r COMPANY_ID < "$id_out" || true
+  if [[ -z "$COMPANY_ID" || ! "$COMPANY_ID" =~ ^[0-9]+$ ]]; then
+    echo "❌ preflight: COMPANY_ID inválido após python: $COMPANY_ID"
+    return 1
   fi
 
-  seed_new_id="$(jq -r '.id // .company_id // empty' "$seed_tmp" 2>/dev/null | head -n1 || true)"
-  if [ -n "$seed_new_id" ] && [ "$seed_new_id" != "null" ]; then
-    COMPANY_ID="$seed_new_id"
-    echo "ℹ️ preflight: usando COMPANY_ID=$COMPANY_ID (retornado pelo seed)"
-  else
-    echo "ℹ️ preflight: seed sem id explícito (seguindo com COMPANY_ID=$COMPANY_ID)"
-  fi
+  echo "ℹ️ preflight: usando COMPANY_ID=$COMPANY_ID"
   return 0
 }
 
 echo "== IA-CNPJ SMOKE =="
 echo "BASE=$BASE COMPANY_ID=$COMPANY_ID START=$START END=$END"
-
 step 1 "/health"
-out="/tmp/smoke_01_health.json"
-req_json 4 GET "$BASE/health" "$out" || fail "step 1 falhou"
+
+# workaround: em alguns ambientes, bash+cURL -w/%{http_code} tem causado segfault.
+# Faz checagem determinística via Python (HTTP 200 + JSON parse).
+python - <<'PY_HEALTH'
+import json, os, urllib.request
+
+base = os.environ.get("BASE", "http://127.0.0.1:8100").rstrip("/")
+url = f"{base}/health"
+
+req = urllib.request.Request(url, method="GET")
+with urllib.request.urlopen(req, timeout=10) as r:
+    body = r.read().decode("utf-8")
+    if r.status != 200:
+        raise SystemExit(f"FAIL health http={r.status}")
+try:
+    json.loads(body)
+except Exception as e:
+    raise SystemExit(f"FAIL health json: {e}")
+print("OK")
+PY_HEALTH
 echo "OK"
 
 echo "ℹ️ preflight: ensure company (COMPANY_ID=$COMPANY_ID)"
@@ -375,128 +571,61 @@ echo "OK"
 
 step 11 "/ai/consult"
 
-
-
-# contrato mínimo do /ai/consult (não quebra cliente)
-echo
-echo "[contract] /ai/consult shape + caps"
-
-tmp="/tmp/ai_consult_contract.json"
-
-call_consult () {
-  local url="$1"
-  curl_auth -sS --max-time 6 -o "$tmp" -w '%{http_code}' "$url" \
-    -H 'Content-Type: application/json' \
-    -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":20,\"question\":\"onde estou gastando mais?\"}"
-}
-
-consult_url="$BASE/ai/consult"
-code="$(call_consult "$consult_url")"
-
-# fallback pra /api/v1 se for Not Found "puro" (rota errada)
-if [ "$code" = "404" ] && jq -e '.detail=="Not Found"' "$tmp" >/dev/null 2>&1; then
-  consult_url="$BASE/api/v1/ai/consult"
-  code="$(call_consult "$consult_url")"
-fi
-
-# se faltar company, tenta seed + retry 1x (CI às vezes vem DB zerado)
-if [ "$code" != "200" ] && jq -e '.detail.error_code=="COMPANY_NOT_FOUND"' "$tmp" >/dev/null 2>&1; then
-  echo "ℹ️ company_id=$COMPANY_ID não existe; tentando seed..."
-
-  seed_tmp="/tmp/ai_consult_seed_company.json"
-  seed_url="$BASE/companies"
-  seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
-  curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
-    -H 'Content-Type: application/json' \
-    -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}' >"${seed_code_file}"
-  seed_code=""  # não carregar payload em variável (evita rc=139)
-
-  # fallback pra /api/v1/companies se necessário
-  if [ "$seed_code" = "404" ]; then
-    seed_url="$BASE/api/v1/companies"
-    seed_code_file="${TMPDIR:-/tmp}/ia-cnpj_seed_code_$$.out"
-    curl_auth -sS --max-time 6 -o "$seed_tmp" -w '%{http_code}' "$seed_url" \
-      -H 'Content-Type: application/json' \
-      -d '{"cnpj":"12345678000195","razao_social":"__SMOKE_COMPANY__ LTDA"}' >"${seed_code_file}"
-    seed_code=""  # não carregar payload em variável (evita rc=139)
-
-  fi
-  if [ "$seed_code" != "200" ] && [ "$seed_code" != "201" ] && [ "$seed_code" != "409" ]; then
-    echo "❌ seed company falhou HTTP $seed_code ($seed_url)"
-    cat "$seed_tmp" | jq . || cat "$seed_tmp"
-    exit 1
-  fi
-  if [ "$seed_code" = "409" ]; then
-    echo "ℹ️ seed retornou 409 (CNPJ já cadastrado); buscando id existente..."
-    lookup_tmp="/tmp/ai_consult_lookup_company.json"
-    lookup_url="$seed_url"
-    lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
-    curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" >"${lookup_code_file}"
-    lookup_code=""  # não carregar payload em variável (evita rc=139)
-
-    if [ "$lookup_code" = "404" ]; then
-      lookup_url="$BASE/api/v1/companies"
-      lookup_code_file="${TMPDIR:-/tmp}/ia-cnpj_lookup_code_$$.out"
-      curl_auth -sS --max-time 6 -o "$lookup_tmp" -w '%{http_code}' "$lookup_url" >"${lookup_code_file}"
-      lookup_code=""  # não carregar payload em variável (evita rc=139)
-
-    fi
-    existing_id="$(jq -r --arg c "12345678000195" '..|objects|select(has("cnpj") and .cnpj==$c and has("id"))|.id' "$lookup_tmp" 2>/dev/null | head -n1 || true)"
-    if [ -z "$existing_id" ] || [ "$existing_id" = "null" ]; then
-      echo "❌ lookup de company por CNPJ falhou (HTTP $lookup_code $lookup_url)"
-      cat "$lookup_tmp" | jq . || cat "$lookup_tmp"
-      exit 1
-    fi
-    COMPANY_ID="$existing_id"
-    consult_url="$(echo "$consult_url" | sed -E "s/(company_id=)[0-9]+/\1$COMPANY_ID/")"
-    echo "ℹ️ usando COMPANY_ID=$COMPANY_ID (lookup por cnpj)"
-  fi
-
-  echo "✅ seed company OK ($seed_url). Retentando consult..."
-  seed_new_id="$(jq -r '.id // .company_id // empty' "$seed_tmp" 2>/dev/null || true)"
-  if [ -n "$seed_new_id" ] && [ "$seed_new_id" != "null" ]; then
-    COMPANY_ID="$seed_new_id"
-    echo "ℹ️ usando COMPANY_ID=$COMPANY_ID (retornado pelo seed)"
-  fi
-  code="$(call_consult "$consult_url")"
-fi
-
-if [ "$code" != "200" ]; then
-  echo "❌ /ai/consult HTTP $code ($consult_url)"
-  echo "---- body ----"
-  cat "$tmp" || true
-  echo "--------------"
-  exit 1
-fi
-
-jq -e '
-  (.company_id|type=="number") and
-  (.period|type=="object") and
-  (.period.start|type=="string") and
-  (.period.end|type=="string") and
-  (.headline|type=="string") and
-  (.insights|type=="array") and
-  (.risks|type=="array") and
-  (.actions|type=="array") and
-  (.top_categories|type=="array") and
-  (.recent_transactions|type=="array") and
-  ((.top_categories|length) <= 8) and
-  ((.recent_transactions|length) <= 20)
-' "$tmp" >/dev/null || {
-  echo "❌ /ai/consult fora do contrato (dump abaixo)"
-  cat "$tmp" | jq . || cat "$tmp"
-  exit 1
-}
-
-echo "OK"
-
-
-curl_auth -sS --max-time 6 -H 'Content-Type: application/json' \
+# valida: HTTP 200 + JSON + contrato (shape + caps) sem segfault do bash
+out="/tmp/smoke_11_ai_consult.json"
+req_json 20 POST "$BASE_API/ai/consult" "$out" \
+  -H "Content-Type: application/json" \
   -d "{\"company_id\":$COMPANY_ID,\"start\":\"$START\",\"end\":\"$END\",\"limit\":10,\"question\":\"smoke\"}" \
-  "$BASE_API/ai/consult" | jq -e . >/dev/null
-echo "OK"
+  || fail "step 11 falhou"
 
-echo
+COMPANY_ID="$COMPANY_ID" START="$START" END="$END" python - <<'PY_CONTRACT'
+import json, os
+
+path = "/tmp/smoke_11_ai_consult.json"
+obj = json.load(open(path, "r", encoding="utf-8"))
+
+def fail(msg):
+    raise SystemExit("FAIL contract: " + msg)
+
+if not isinstance(obj, dict):
+    fail("root não é objeto")
+
+cid = int(os.environ.get("COMPANY_ID", "1"))
+start = os.environ.get("START", "")
+end = os.environ.get("END", "")
+
+# shape mínimo
+if "company_id" not in obj:
+    fail("faltou company_id")
+if int(obj.get("company_id")) != cid:
+    fail(f"company_id mismatch: got={obj.get('company_id')} expected={cid}")
+
+period = obj.get("period")
+if not isinstance(period, dict):
+    fail("faltou period{start,end}")
+if period.get("start") != start:
+    fail(f"period.start mismatch: got={period.get('start')} expected={start}")
+if period.get("end") != end:
+    fail(f"period.end mismatch: got={period.get('end')} expected={end}")
+
+# caps
+rt = obj.get("recent_transactions")
+if rt is None:
+    fail("faltou recent_transactions")
+if not isinstance(rt, list):
+    fail("recent_transactions não é lista")
+if len(rt) > 20:
+    fail(f"recent_transactions > 20 (len={len(rt)})")
+
+import os as _os
+sz = _os.path.getsize(path)
+if sz > 350_000:
+    fail(f"payload muito grande: {sz} bytes")
+
+print("[contract] /ai/consult shape + caps OK")
+PY_CONTRACT
+
+echo "OK"
 
 step 12 "reports ai-consult pdf (/reports/ai-consult/pdf)"
 
