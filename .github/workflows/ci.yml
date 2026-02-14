@@ -134,7 +134,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
-      - name: Smoke (uvicorn + scripts/smoke.sh)
+      - name: Smoke (make dev)
         env:
           DATABASE_URL: sqlite:////tmp/ia_cnpj_ci.db
           IA_CNPJ_ENV: lab
@@ -149,55 +149,19 @@ jobs:
           set -euo pipefail
           set -o xtrace
           export SHELLOPTS
-
+          
           # sanity: bash filho herda xtrace via SHELLOPTS
           bash --noprofile --norc -c '[[ $- == *x* ]] && echo "xtrace inherited ✅"'
-
-          # init DB (CI): aplica migrations se Alembic existir
-    if command -v alembic >/dev/null 2>&1 && { [ -f backend/alembic.ini ] || [ -d backend/alembic ]; }; then
-      (cd backend && alembic upgrade head)
-    else
-      echo "ℹ️ CI: alembic não encontrado (ou sem config) — pulando migrations"
-    fi
-
-    # sobe API (background) no mesmo job/env
-          (cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8100) > /tmp/ci_api.log 2>&1 &
-          API_PID=$!
-          trap 'kill "$API_PID" || true' EXIT
-
-          # espera /health (determinístico)
-          python - <<'PY_WAIT'
-          import time, urllib.request
-          base='http://127.0.0.1:8100'
-          for i in range(45):
-              try:
-                  with urllib.request.urlopen(base + '/health', timeout=2) as r:
-                      if r.status == 200:
-                          print('api up ✅')
-                          break
-              except Exception:
-                  time.sleep(1)
-          else:
-              raise SystemExit('FAIL: API não subiu em /health')
-          PY_WAIT
-
-          # roda smoke real (Master2)
-          set +e
-    (cd backend && BASE="http://127.0.0.1:8100" bash scripts/smoke.sh) |& tee /tmp/ci_smoke.log
-    rc=${PIPESTATUS[0]}
-    set -e
-    if [ "$rc" -ne 0 ]; then
-      echo "== /tmp/ci_api.log (tail) =="
-      tail -n 200 /tmp/ci_api.log || true
-      echo "== /tmp/ci_smoke.log (tail) =="
-      tail -n 200 /tmp/ci_smoke.log || true
-      exit "$rc"
-    fi
-
+          
+          # smoke.sh não deve rodar com xtrace interno
+          export SMOKE_FORCE_NO_XTRACE=1
+          
+          # volta pro caminho que já fazia bootstrap (DB/migrations/seed)
+          make dev |& tee /tmp/ci_smoke.log
+          
           # segurança: NÃO pode vazar header Authorization nem JWT (prefixo eyJhbGci)
-          if grep -nE 'Authorization: Bearer|eyJhbGci' /tmp/ci_smoke.log /tmp/ci_api.log; then
+          if grep -nE 'Authorization: Bearer|eyJhbGci' /tmp/ci_smoke.log /tmp/ci_api.log 2>/dev/null; then
             echo '❌ SECURITY: token vazou no log sob xtrace'
             exit 1
           fi
-
           echo '✅ OK: não vazou token sob xtrace'
