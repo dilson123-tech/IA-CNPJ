@@ -1,0 +1,2 @@
+Master2 — Smoke estável (segfault-free + auth-aware + contract)
+Corrigimos o smoke que estava morrendo com rc=139 (segfault) em bash/curl, migrando checks críticos para Python (health, req_json e preflight ensure_company). O smoke ficou “auth-aware”, com fallback em 401 e refresh em “Token expired”. Adicionamos contrato determinístico no /ai/consult (shape + caps) e mantivemos validação do PDF em /reports/ai-consult/pdf. CI agora sobe API via uvicorn e roda scripts/smoke.sh com anti-leak guard (sem vazar Authorization/JWT), passando 12/12 local e no GitHub Actions.
