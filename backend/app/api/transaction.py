@@ -125,6 +125,9 @@ def _rules() -> list[dict[str, Any]]:
         {"rule": "teste|testes|qa|homolog|homologacao|homologação|experimento", "keywords": ["teste","testes","qa","homolog","homologacao","homologação","experimento"], "category_name": "Testes", "confidence": 0.60},
     ]
 
+# Alias público para testes/contratos (evita ImportError)
+RULES = _rules()
+
 def _ensure_categories_by_name(db: Session, company_id: int, names: list[str]) -> dict[str, int]:
     # cria categorias que não existirem, e retorna mapa name->id
     existing = list(db.scalars(select(Category)))
