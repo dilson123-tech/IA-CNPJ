@@ -129,6 +129,11 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
 
+      - name: Install deps (smoke job)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
       - name: Smoke (make dev)
         env:
           DATABASE_URL: sqlite:////tmp/ia_cnpj_ci.db
@@ -144,16 +149,19 @@ jobs:
           set -euo pipefail
           set -o xtrace
           export SHELLOPTS
-
+          
           # sanity: bash filho herda xtrace via SHELLOPTS
           bash --noprofile --norc -c '[[ $- == *x* ]] && echo "xtrace inherited ✅"'
-
+          
+          # smoke.sh não deve rodar com xtrace interno
+          export SMOKE_FORCE_NO_XTRACE=1
+          
+          # volta pro caminho que já fazia bootstrap (DB/migrations/seed)
           make dev |& tee /tmp/ci_smoke.log
-
+          
           # segurança: NÃO pode vazar header Authorization nem JWT (prefixo eyJhbGci)
-          if grep -nE 'Authorization: Bearer|eyJhbGci' /tmp/ci_smoke.log; then
-            echo "❌ SECURITY: token vazou no log sob xtrace"
+          if grep -nE 'Authorization: Bearer|eyJhbGci' /tmp/ci_smoke.log /tmp/ci_api.log 2>/dev/null; then
+            echo '❌ SECURITY: token vazou no log sob xtrace'
             exit 1
           fi
-
-          echo "✅ OK: não vazou token sob xtrace"
+          echo '✅ OK: não vazou token sob xtrace'
