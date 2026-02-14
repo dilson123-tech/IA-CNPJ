@@ -153,7 +153,14 @@ jobs:
           # sanity: bash filho herda xtrace via SHELLOPTS
           bash --noprofile --norc -c '[[ $- == *x* ]] && echo "xtrace inherited ✅"'
 
-          # sobe API (background) no mesmo job/env
+          # init DB (CI): aplica migrations se Alembic existir
+    if command -v alembic >/dev/null 2>&1 && { [ -f backend/alembic.ini ] || [ -d backend/alembic ]; }; then
+      (cd backend && alembic upgrade head)
+    else
+      echo "ℹ️ CI: alembic não encontrado (ou sem config) — pulando migrations"
+    fi
+
+    # sobe API (background) no mesmo job/env
           (cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8100) > /tmp/ci_api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" || true' EXIT
@@ -175,7 +182,17 @@ jobs:
           PY_WAIT
 
           # roda smoke real (Master2)
-          (cd backend && BASE="http://127.0.0.1:8100" bash scripts/smoke.sh) |& tee /tmp/ci_smoke.log
+          set +e
+    (cd backend && BASE="http://127.0.0.1:8100" bash scripts/smoke.sh) |& tee /tmp/ci_smoke.log
+    rc=${PIPESTATUS[0]}
+    set -e
+    if [ "$rc" -ne 0 ]; then
+      echo "== /tmp/ci_api.log (tail) =="
+      tail -n 200 /tmp/ci_api.log || true
+      echo "== /tmp/ci_smoke.log (tail) =="
+      tail -n 200 /tmp/ci_smoke.log || true
+      exit "$rc"
+    fi
 
           # segurança: NÃO pode vazar header Authorization nem JWT (prefixo eyJhbGci)
           if grep -nE 'Authorization: Bearer|eyJhbGci' /tmp/ci_smoke.log /tmp/ci_api.log; then
