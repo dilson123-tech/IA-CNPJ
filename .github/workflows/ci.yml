@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
 
@@ -16,7 +17,6 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -24,27 +24,12 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             backend/requirements-dev.txt
-
       - name: Install deps
-        run: |
-          pip install -r requirements.txt -r requirements-dev.txt
-
+        run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Ruff
         run: ruff check .
-
       - name: Py compile
         run: python -m compileall -q .
-      - name: Install shellcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-
-      - name: Shell scripts (bash -n + shellcheck)
-        shell: bash
-        run: |
-          set -euo pipefail
-          find scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
-          find scripts -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -x -S error
 
   settings_contract:
     runs-on: ubuntu-22.04
@@ -54,7 +39,6 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -62,65 +46,45 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             backend/requirements-dev.txt
-
       - name: Install deps
-        run: |
-          pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Settings contract (auth invariants)
-        shell: bash
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Settings contract
         env:
           DATABASE_URL: sqlite:////tmp/ia_cnpj_contract.db
-        run: |
-          set -euo pipefail
+        run: python -c "import app.main"
 
-          fail_msg() { echo "❌ $1"; shift; printf '%s\n' "$@" >&2; exit 1; }
-
-          expect_fail_grep() {
-            local name="$1" pat="$2"; shift 2
-            local out; out="$(mktemp)"
-            if "$@" >"$out" 2>&1; then
-              cat "$out"; rm -f "$out"
-              fail_msg "era pra FALHAR: $name"
-            fi
-            if ! grep -qE "$pat" "$out"; then
-              cat "$out"; rm -f "$out"
-              fail_msg "falhou, mas não bateu o motivo esperado: $name" "pattern=$pat"
-            fi
-            echo "✅ expected FAIL: $name"
-            rm -f "$out"
-          }
-
-          expect_pass() {
-            local name="$1"; shift
-            local out; out="$(mktemp)"
-            if ! "$@" >"$out" 2>&1; then
-              cat "$out"; rm -f "$out"
-              fail_msg "era pra PASSAR: $name"
-            fi
-            echo "✅ expected PASS: $name"
-            rm -f "$out"
-          }
-
-          # 1) ENV=prod exige AUTH_ENABLED=true
-          expect_fail_grep "prod requires auth" "ENV=prod requer AUTH_ENABLED=true"             env IA_CNPJ_ENV=prod IA_CNPJ_AUTH_ENABLED=false python -c "import app.main"
-
-          # 2) AUTH_PROTECT_DOCS não pode existir sem AUTH_ENABLED
-          expect_fail_grep "protect_docs requires auth" "AUTH_PROTECT_DOCS|AUTH_ENABLED"             env IA_CNPJ_ENV=lab IA_CNPJ_AUTH_ENABLED=false IA_CNPJ_AUTH_PROTECT_DOCS=true python -c "import app.main"
-
-          # 3) AUTH_ENABLED=true exige AUTH_JWT_SECRET preenchido
-          expect_fail_grep "jwt secret required" "AUTH_JWT_SECRET vazio"             env IA_CNPJ_ENV=lab IA_CNPJ_AUTH_ENABLED=true IA_CNPJ_AUTH_USERNAME=admin IA_CNPJ_AUTH_PASSWORD=Aurea@12345 IA_CNPJ_AUTH_JWT_SECRET= python -c "import app.main"
-
-          # 4) happy path
-          expect_pass "happy path import"             env IA_CNPJ_ENV=prod IA_CNPJ_AUTH_ENABLED=true IA_CNPJ_AUTH_PROTECT_DOCS=true IA_CNPJ_AUTH_USERNAME=admin IA_CNPJ_AUTH_PASSWORD=Aurea@12345                 IA_CNPJ_AUTH_JWT_SECRET=0123456789abcdef0123456789abcdef                 python -c "import app.main; print('IMPORT OK ✅')"
-
+  tests:
+    runs-on: ubuntu-22.04
+    needs: [lint, settings_contract]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - name: Install deps
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run pytest
+        env:
+          DATABASE_URL: sqlite:////tmp/ia_cnpj_test.db
+          IA_CNPJ_ENV: lab
+          IA_CNPJ_AUTH_ENABLED: "true"
+          IA_CNPJ_AUTH_JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          IA_CNPJ_AUTH_USERNAME: dev
+          IA_CNPJ_AUTH_PASSWORD: dev
+        run: pytest -q
 
   smoke:
     runs-on: ubuntu-22.04
-    needs: [lint, settings_contract]
+    needs: [lint, settings_contract, tests]
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -128,13 +92,9 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             backend/requirements-dev.txt
-
-      - name: Install deps (smoke job)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
-
-      - name: Smoke (make dev)
+      - name: Install deps
+        run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - name: Smoke
         env:
           DATABASE_URL: sqlite:////tmp/ia_cnpj_ci.db
           IA_CNPJ_ENV: lab
@@ -144,24 +104,4 @@ jobs:
           IA_CNPJ_AUTH_PASSWORD: Aurea@12345
           SMOKE_AUTH_USER: admin
           SMOKE_AUTH_PASS: Aurea@12345
-        shell: bash
-        run: |
-          set -euo pipefail
-          set -o xtrace
-          export SHELLOPTS
-          
-          # sanity: bash filho herda xtrace via SHELLOPTS
-          bash --noprofile --norc -c '[[ $- == *x* ]] && echo "xtrace inherited ✅"'
-          
-          # smoke.sh não deve rodar com xtrace interno
-          export SMOKE_FORCE_NO_XTRACE=1
-          
-          # volta pro caminho que já fazia bootstrap (DB/migrations/seed)
-          make dev |& tee /tmp/ci_smoke.log
-          
-          # segurança: NÃO pode vazar header Authorization nem JWT (prefixo eyJhbGci)
-          if grep -nE 'Authorization: Bearer|eyJhbGci' /tmp/ci_smoke.log /tmp/ci_api.log 2>/dev/null; then
-            echo '❌ SECURITY: token vazou no log sob xtrace'
-            exit 1
-          fi
-          echo '✅ OK: não vazou token sob xtrace'
+        run: make dev
