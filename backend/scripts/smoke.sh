@@ -632,9 +632,12 @@ step 12 "reports ai-consult pdf (/reports/ai-consult/pdf)"
 # valida: HTTP 200 + content-type=application/pdf + magic %PDF
 SMOKE_AUTH_HEADER_FILE="${__hdr:-/tmp/ia_cnpj_auth_header}" python - <<'PY_PDF'
 import json, os, urllib.request
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 base = os.environ.get("BASE", "http://127.0.0.1:8100").rstrip("/")
 prefix = os.environ.get("API_PREFIX", "")
+
 url = f"{base}{prefix}/reports/ai-consult/pdf"
 
 payload = {
@@ -644,77 +647,110 @@ payload = {
     "include_no_match": True,
 }
 
-# auth-aware headers (respeita AUTH_ENABLED)
-
-import os, json
-
-from urllib.request import Request, urlopen
-
-from urllib.error import HTTPError
-
-
 headers = {"Content-Type": "application/json", "Accept": "application/pdf"}
 
-auth_enabled = os.getenv("AUTH_ENABLED", "").lower() in ("1","true","yes","on")
-
-if auth_enabled:
-
-    user = os.getenv("AUTH_USERNAME", "dev")
-
-    pw = os.getenv("AUTH_PASSWORD") or os.getenv("AUTH_PLAIN_PASSWORD") or "dev"
-
-    payload_login = json.dumps({"username": user, "password": pw}).encode("utf-8")
-
-
-    token = None
-
-    for login_url in (f"{base}{prefix}/auth/login", f"{base}/auth/login"):
-
-        try:
-
-            req = Request(login_url, data=payload_login, headers={"Content-Type": "application/json"})
-
-            with urlopen(req, timeout=20) as r:
-
-                body = r.read().decode("utf-8")
-
-            token = json.loads(body).get("access_token")
-
-            if token:
-
-                break
-
-        except HTTPError:
-
-            pass
-
-
-    if not token:
-
-        raise SystemExit("FAIL auth: AUTH_ENABLED=true mas não consegui obter access_token")
-
-    headers["Authorization"] = f"Bearer {token}"
-hdr_file = os.environ.get("SMOKE_AUTH_HEADER_FILE", "")
-if hdr_file:
+def header_file_auth():
+    hdr_file = os.environ.get("SMOKE_AUTH_HEADER_FILE", "")
+    if not hdr_file:
+        return None
     try:
         txt = open(hdr_file, "r", encoding="utf-8").read().strip()
-        if txt.lower().startswith("authorization:"):
-            headers["Authorization"] = txt.split(":", 1)[1].strip()
     except FileNotFoundError:
-        pass
+        return None
+    if txt.lower().startswith("authorization:"):
+        return txt.split(":", 1)[1].strip()
+    return None
 
-data = json.dumps(payload).encode("utf-8")
-req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+def login_get_token():
+    user = os.getenv("AUTH_USERNAME", "dev")
+    pw = os.getenv("AUTH_PASSWORD") or os.getenv("AUTH_PLAIN_PASSWORD") or "dev"
+    payload_login = json.dumps({"username": user, "password": pw}).encode("utf-8")
 
-with urllib.request.urlopen(req, timeout=30) as r:
-    ct = (r.headers.get("Content-Type") or "").lower()
-    head = r.read(4)
-    if r.status != 200:
-        raise SystemExit(f"FAIL pdf http={r.status}")
-    if "application/pdf" not in ct:
-        raise SystemExit(f"FAIL pdf content-type={ct}")
-    if head != b"%PDF":
-        raise SystemExit("FAIL pdf magic (não começa com %PDF)")
+    token = None
+    for login_url in (f"{base}{prefix}/auth/login", f"{base}/auth/login"):
+        try:
+            req = Request(login_url, data=payload_login, headers={"Content-Type": "application/json"}, method="POST")
+            with urlopen(req, timeout=20) as r:
+                body = r.read().decode("utf-8", "replace")
+            token = json.loads(body).get("access_token")
+            if token:
+                return token
+        except Exception:
+            pass
+    return None
+
+def fetch_pdf(hdrs):
+    data = json.dumps(payload).encode("utf-8")
+    req = Request(url, data=data, headers=hdrs, method="POST")
+    try:
+        with urlopen(req, timeout=30) as r:
+            status = getattr(r, "status", None)
+            ct = (r.headers.get("Content-Type") or "").lower()
+            head = r.read(4)
+
+            max_bytes = int(os.environ.get("SMOKE_PDF_MAX_BYTES", "5000000"))
+            min_bytes = int(os.environ.get("SMOKE_PDF_MIN_BYTES", "1200"))
+
+            kept = bytearray()
+            total = len(head)
+
+            while True:
+                chunk = r.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise SystemExit(f"FAIL pdf payload too large: {total} bytes (max={max_bytes})")
+                if len(kept) < 128:
+                    kept.extend(chunk[: 128 - len(kept)])
+
+            peek = head + bytes(kept)
+            return status, ct, head, total, peek
+    except HTTPError as e:
+        body = b""
+        try:
+            body = e.read(256) or b""
+        except Exception:
+            pass
+        ct = (getattr(e, "headers", {}) or {}).get("Content-Type", "") or ""
+        return e.code, ct.lower(), b"", 0, body
+
+# 1) tenta usar Authorization do header file (se existir)
+auth = header_file_auth()
+if auth:
+    headers["Authorization"] = auth
+
+# 2) detecta auth_enabled por ENV (AUTH_ENABLED ou IA_CNPJ_AUTH_ENABLED)
+auth_enabled = (
+    os.getenv("AUTH_ENABLED", "").lower() in ("1", "true", "yes", "on")
+    or os.getenv("IA_CNPJ_AUTH_ENABLED", "").lower() in ("1", "true", "yes", "on")
+)
+
+# 3) se precisa auth e não tem Authorization, faz login
+if auth_enabled and "Authorization" not in headers:
+    tok = login_get_token()
+    if not tok:
+        raise SystemExit("FAIL auth: AUTH_ENABLED/IA_CNPJ_AUTH_ENABLED=true mas não consegui obter access_token")
+    headers["Authorization"] = f"Bearer {tok}"
+
+status, ct, head, total, peek = fetch_pdf(headers)
+
+# 4) se token expirou (401), re-login 1x e tenta de novo
+if status == 401 and b"token expired" in (peek or b"").lower():
+    tok = login_get_token()
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+        status, ct, head, total, peek = fetch_pdf(headers)
+
+if status != 200:
+    raise SystemExit(f"FAIL pdf http={status} content-type={ct} peek={peek[:64]!r}")
+if "application/pdf" not in (ct or ""):
+    raise SystemExit(f"FAIL pdf content-type={ct} peek={peek[:64]!r}")
+if head != b"%PDF":
+    raise SystemExit(f"FAIL pdf magic head={head!r} peek={peek[:64]!r}")
+if total < int(os.environ.get("SMOKE_PDF_MIN_BYTES", "1200")):
+    raise SystemExit(f"FAIL pdf too small: {total} bytes")
+
 print("OK pdf /reports/ai-consult/pdf")
 PY_PDF
 echo "✅ SMOKE PASS"
