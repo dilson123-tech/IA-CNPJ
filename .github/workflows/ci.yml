@@ -70,7 +70,8 @@ jobs:
             backend/requirements-dev.txt
       - name: Install deps
         run: pip install -r requirements.txt -r requirements-dev.txt
-      - name: Run pytest
+        python -m pip install -U pytest
+      - name: Run python -m pytest
         env:
           DATABASE_URL: sqlite:////tmp/ia_cnpj_test.db
           IA_CNPJ_ENV: lab
@@ -78,7 +79,7 @@ jobs:
           IA_CNPJ_AUTH_JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
           IA_CNPJ_AUTH_USERNAME: dev
           IA_CNPJ_AUTH_PASSWORD: dev
-        run: pytest -q
+        run: python -m pytest -q
 
   smoke:
     runs-on: ubuntu-22.04
