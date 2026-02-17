@@ -1,17 +1,39 @@
 from typing import Optional, List
 
 from datetime import datetime
-from pydantic import BaseModel, Field, AliasChoices, ConfigDict
+from pydantic import BaseModel, Field, AliasChoices, ConfigDict, model_validator
 
 from app.schemas.reports import Period, Totals, CategoryBreakdown, TransactionBrief
 
 
+class PeriodIn(BaseModel):
+    start: str | None = None
+    end: str | None = None
+
 class AiConsultRequest(BaseModel):
     company_id: int = Field(..., ge=1)
+    period: PeriodIn | None = None  # compat: aceita period{start,end}
     start: str | None = Field(None, description="YYYY-MM-DD ou ISO datetime")
     end: str | None = Field(None, description="YYYY-MM-DD ou ISO datetime")
     limit: int = Field(20, ge=1, le=200)
     question: str | None = Field(None, description="Pergunta opcional do usuário")
+
+    @model_validator(mode="after")
+    def _normalize_period(self):
+        # compat 1: period{start,end}
+        if getattr(self, "period", None):
+            if not getattr(self, "start", None) and self.period.start:
+                self.start = self.period.start
+            if not getattr(self, "end", None) and self.period.end:
+                self.end = self.period.end
+
+        # compat 2: start_date/end_date (front antigo)
+        if getattr(self, "start_date", None) and not getattr(self, "start", None):
+            self.start = self.start_date
+        if getattr(self, "end_date", None) and not getattr(self, "end", None):
+            self.end = self.end_date
+
+        return self
 
 
 class AiConsultResponse(BaseModel):
