@@ -46,6 +46,9 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
         start_dt, end_dt, period = rep._resolve_period(payload.start, payload.end)
         totals: Totals = rep._totals_row(db, payload.company_id, start_dt, end_dt)
         by_cat = rep._by_category(db, payload.company_id, start_dt, end_dt)
+        # sem categoria (derivado de by_cat) — usado no score
+        semcat = next((c for c in by_cat if getattr(c, 'category_id', None) is None), None)
+
 
         # recentes (mesma query do context)
         ctx = rep.context(
@@ -111,7 +114,7 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
                 Transaction.kind == 'out',
             )
             .group_by(desc_key)
-            .order_by(func.sum(Transaction.amount_cents).desc())
+            .order_by(func.sum(Transaction.amount_cents).desc(), desc_key.asc())
             .limit(5)
         )
 
@@ -138,7 +141,7 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
             )
             .group_by(desc_key)
             .having(func.count(Transaction.id) >= 2)
-            .order_by(func.sum(Transaction.amount_cents).desc())
+            .order_by(func.sum(Transaction.amount_cents).desc(), desc_key.asc())
             .limit(3)
         )
 
@@ -175,8 +178,35 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
         entradas = totals.entradas_cents
         saidas = totals.saidas_cents
         saldo = totals.saldo_cents
+                # -----------------------------
+        # Runway Engine v1 (determinístico)
+        # - evita float drift: tudo em cents/dias inteiros
+        # - runway_days_int pode ser negativo (déficit estrutural)
+        # -----------------------------
+        days = (end_dt.date() - start_dt.date()).days + 1
+        days = max(1, int(days))
 
-        # headline
+        # média diária de saídas em cents/dia (inteiro, arredondando pra cima)
+        avg_daily_out_cents = (saidas + (days - 1)) // days if saidas > 0 else 0
+
+        runway_days_int = None
+        runway_status = None
+
+        if avg_daily_out_cents > 0:
+            runway_days_int = saldo // avg_daily_out_cents  # pode ser negativo
+
+            if runway_days_int < 0:
+                runway_status = "déficit estrutural"
+            elif runway_days_int < 15:
+                runway_status = "crítico"
+            elif runway_days_int < 30:
+                runway_status = "alto risco"
+            elif runway_days_int < 60:
+                runway_status = "atenção"
+            else:
+                runway_status = "saudável"
+
+# headline
         if saldo >= 0:
             headline = f"Saldo positivo de {_fmt_brl(saldo)} no período."
         else:
@@ -243,12 +273,26 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
             if top_desc:
 
                 for i, v in enumerate(top_desc[:3], start=1):
+                    soma = int(v["sum"])
+                    cnt = int(v["cnt"])
+                    pct_saidas = (soma / saidas * 100.0) if saidas > 0 else 0.0
+                    pct_entradas = (soma / entradas * 100.0) if entradas > 0 else 0.0
 
-                    insights.append(f"Top gasto #{i} por descrição: {v['sample']} — {_fmt_brl(int(v['sum']))} ({int(v['cnt'])}x).")
+                    insights.append(
+                        f"Top gasto #{i}: {v['sample']} — {_fmt_brl(soma)} "
+                        f"({cnt}x | {pct_saidas:.1f}% das saídas"
+                        + (f" | {pct_entradas:.1f}% das entradas" if entradas > 0 else "")
+                        + ")."
+                    )
 
-                if len(top_desc) > 3:
-
-                    insights.append("Há mais gastos relevantes por descrição (top 5) — vale abrir o PDF e ver a lista completa.")
+                    if pct_saidas >= 40.0:
+                        risks.append(
+                            f"Alta dependência de um único fornecedor/descrição "
+                            f"({pct_saidas:.0f}% das saídas)."
+                        )
+                        actions.append(
+                            "Avalie renegociação, troca de fornecedor ou limite mensal específico."
+                        )
 
 
             # recorrência (assinaturas / cobranças repetidas)
@@ -295,7 +339,18 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
                 risks.append("Saídas maiores que entradas no período (burn).")
                 actions.append("Investigue custos e defina teto por categoria de despesa.")
 
-            # pergunta do usuário (placeholder)
+            
+                # insight runway
+                if runway_days_int is not None:
+                    if runway_days_int < 0:
+                        insights.append("Empresa opera em déficit estrutural no ritmo atual.")
+                    else:
+                        insights.append(f"Runway estimado: {int(runway_days_int)} dias no ritmo atual de saídas.")
+                        if runway_days_int < 29:
+                            risks.append("Runway inferior a 30 dias — risco operacional elevado.")
+                            actions.append("Reduza despesas imediatamente ou aumente receitas para estender o caixa.")
+
+              # pergunta do usuário (placeholder)
             if payload.question:
                 insights.append(f"Pergunta recebida: {payload.question}")
 
@@ -339,6 +394,9 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
             score -= 15
 
         
+
+        # sem categoria (derivado de by_cat) — precisa existir antes do score
+        semcat = next((c for c in by_cat if getattr(c, 'category_id', None) is None), None)
 
         # Sem categoria (qualidade do dado)
 
@@ -434,9 +492,8 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
                 insights.insert(0, insights.pop(idx))
         except StopIteration:
             pass
-
         # observabilidade mínima (sem dados sensíveis)
-        semcat = next((c for c in by_cat if getattr(c, 'category_id', None) is None), None)
+        # semcat já calculado acima (mantido determinístico)
 
 
         try:
