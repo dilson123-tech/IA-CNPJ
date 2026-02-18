@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class TransactionCreate(BaseModel):
     company_id: int
-    category_id: int | None = None
+    category_id: int
     kind: str = Field(pattern="^(in|out)$")
     amount_cents: int = Field(ge=1)
     occurred_at: datetime | None = None
@@ -12,7 +12,7 @@ class TransactionCreate(BaseModel):
 class TransactionOut(BaseModel):
     id: int
     company_id: int
-    category_id: int | None
+    category_id: int
     kind: str
     amount_cents: int
     occurred_at: datetime | None = None
