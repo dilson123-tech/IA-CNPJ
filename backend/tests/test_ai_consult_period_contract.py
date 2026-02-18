@@ -1,4 +1,3 @@
-import pytest
 
 def test_ai_consult_respects_period(client, auth_header):
     payload = {
