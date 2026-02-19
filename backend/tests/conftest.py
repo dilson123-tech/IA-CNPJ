@@ -1,9 +1,13 @@
+from app.db import engine, Base
+
+
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 
 @pytest.fixture
 def client():
+    Base.metadata.create_all(bind=engine)
     return TestClient(app)
 
 @pytest.fixture

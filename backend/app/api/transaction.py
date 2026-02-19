@@ -21,11 +21,10 @@ def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db)
     if not company:
         raise HTTPException(status_code=404, detail="Empresa (company_id) nao existe")
 
-    # valida categoria (se veio)
-    if payload.category_id is not None:
-        cat = db.get(Category, payload.category_id)
-        if not cat:
-            raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
+    # valida categoria
+    cat = db.get(Category, payload.category_id)
+    if not cat:
+        raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
 
     t = Transaction(
         company_id=payload.company_id,
@@ -281,7 +280,7 @@ def apply_suggestions(
             "invalid_category_ids": [],
         }
 
-    req = BulkCategorizeRequest(company_id=company_id, items=items)
+    req = BulkCategorizeRequest, BulkCategorizeResponse(company_id=company_id, items=items)
     res = bulk_categorize(req, db=db)
 
     # compat pydantic v1/v2
@@ -308,19 +307,14 @@ def set_transaction_category(
     if not tx or tx.company_id != company_id:
         raise HTTPException(status_code=404, detail="Transacao nao existe para essa empresa")
 
-    if payload.category_id is not None:
-        cat = db.get(Category, payload.category_id)
-        if not cat:
-            raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
-        if hasattr(cat, "company_id") and getattr(cat, "company_id") != company_id:
-            raise HTTPException(status_code=422, detail={
-                "error_code": "CATEGORY_OTHER_COMPANY",
-                "message": "Categoria nao pertence a esta empresa",
-                "category_id": payload.category_id,
-            })
+    cat = db.get(Category, payload.category_id)
+    if not cat:
+        raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
+
+    if hasattr(cat, "company_id") and getattr(cat, "company_id") != company_id:
+        raise HTTPException(status_code=422, detail="Categoria nao pertence a esta empresa")
 
     tx.category_id = payload.category_id
-    db.add(tx)
     db.commit()
     db.refresh(tx)
     return tx
@@ -328,56 +322,32 @@ def set_transaction_category(
 
 @router.post("/bulk-categorize", response_model=BulkCategorizeResponse)
 def bulk_categorize(payload: BulkCategorizeRequest, db: Session = Depends(get_db)):
-    rep._ensure_company(db, payload.company_id)
+    tx_ids = payload.transaction_ids
 
-    items = payload.items or []
-    if not items:
-        return BulkCategorizeResponse(company_id=payload.company_id, updated=0)
+    if not tx_ids:
+        return BulkCategorizeResponse(company_id=0, updated=0)
 
-    if len(items) > 500:
-        raise HTTPException(status_code=422, detail={
-            "error_code": "TOO_MANY_ITEMS",
-            "message": "Limite de 500 itens por lote",
-            "value": len(items),
-        })
-
-    tx_ids = [it.id for it in items]
     tx_rows = list(db.scalars(select(Transaction).where(Transaction.id.in_(tx_ids))))
-    tx_by_id = {t.id: t for t in tx_rows}
 
-    cat_ids = sorted({it.category_id for it in items if it.category_id is not None})
-    existing_cat_ids: set[int] = set()
-    if cat_ids:
-        q = select(Category.id).where(Category.id.in_(cat_ids))
-        if hasattr(Category, "company_id"):
-            q = q.where(Category.company_id == payload.company_id)
-        existing_cat_ids = set(db.scalars(q).all())
+    if not tx_rows:
+        raise HTTPException(status_code=404, detail="Nenhuma transacao encontrada para os IDs informados")
 
-    invalid_cat_ids = sorted(set(cat_ids) - existing_cat_ids)
+    company_ids = {tx.company_id for tx in tx_rows}
+    if len(company_ids) > 1:
+        raise HTTPException(status_code=422, detail="Transacoes de empresas diferentes no mesmo lote")
+
+    cat = db.get(Category, payload.category_id)
+    if not cat:
+        raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
+
+    if hasattr(cat, "company_id") and getattr(cat, "company_id") != tx_rows[0].company_id:
+        raise HTTPException(status_code=422, detail="Categoria nao pertence a mesma empresa do lote")
 
     updated = 0
-    missing: list[int] = []
-    skipped: list[int] = []
-
-    for it in items:
-        tx = tx_by_id.get(it.id)
-        if not tx:
-            missing.append(it.id)
-            continue
-        if tx.company_id != payload.company_id:
-            skipped.append(it.id)
-            continue
-        if it.category_id is not None and it.category_id in invalid_cat_ids:
-            continue
-        tx.category_id = it.category_id
+    for tx in tx_rows:
+        tx.category_id = payload.category_id
         updated += 1
 
     db.commit()
 
-    return BulkCategorizeResponse(
-        company_id=payload.company_id,
-        updated=updated,
-        missing_ids=sorted(set(missing)),
-        skipped_ids=sorted(set(skipped)),
-        invalid_category_ids=invalid_cat_ids,
-    )
+    return BulkCategorizeResponse(company_id=tx_rows[0].company_id, updated=updated)
