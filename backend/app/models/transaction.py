@@ -9,7 +9,7 @@ class Transaction(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
-    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), nullable=False)
 
     # "in" (entrada) ou "out" (saida)
     kind: Mapped[str] = mapped_column(String(3), index=True)

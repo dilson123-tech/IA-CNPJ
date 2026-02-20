@@ -13,7 +13,7 @@ router = APIRouter(prefix="/companies", tags=["companies"])
 logger = logging.getLogger(__name__)
 
 
-@router.post("", response_model=CompanyOut)
+@router.post("", response_model=CompanyOut, status_code=201)
 def create_company(payload: CompanyCreate, db: Session = Depends(get_db)):
     exists = db.scalar(select(Company).where(Company.cnpj == payload.cnpj))
     if exists:
