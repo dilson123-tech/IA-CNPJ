@@ -21,3 +21,4 @@ class Transaction(Base):
     occurred_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     description: Mapped[str] = mapped_column(String(200), default="")
+    tenant_id: Mapped[int] = mapped_column(nullable=False, index=True)

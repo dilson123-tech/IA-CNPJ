@@ -5,20 +5,27 @@ from typing import Any, Dict
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
 from passlib.hash import pbkdf2_sha256
 import jwt
 
 from app.core.settings import settings
+from app.deps import get_db
+from app.models.tenant import TenantMember
+from app.tenant_context import set_tenant_on_session
 
 bearer = HTTPBearer(auto_error=False)
 
+
 def hash_password(plain: str) -> str:
     return pbkdf2_sha256.hash(plain)
+
 
 def verify_password(plain: str, hashed: str) -> bool:
     if not hashed:
         return False
     return pbkdf2_sha256.verify(plain, hashed)
+
 
 def _secret() -> str:
     sec = getattr(settings, "AUTH_JWT_SECRET", "") or ""
@@ -27,6 +34,7 @@ def _secret() -> str:
     if not sec:
         raise RuntimeError("SECURITY: AUTH_JWT_SECRET vazio (obrigatório quando AUTH_ENABLED=true)")
     return sec
+
 
 def create_access_token(sub: str, ttl_s: int | None = None) -> str:
     ttl = int(ttl_s or getattr(settings, "AUTH_ACCESS_TOKEN_TTL_S", 3600))
@@ -37,6 +45,7 @@ def create_access_token(sub: str, ttl_s: int | None = None) -> str:
         "exp": int((now + timedelta(seconds=ttl)).timestamp()),
     }
     return jwt.encode(payload, _secret(), algorithm="HS256")
+
 
 def decode_token(token: str) -> Dict[str, Any]:
     try:
@@ -54,11 +63,35 @@ def decode_token(token: str) -> Dict[str, Any]:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-def require_auth(creds: HTTPAuthorizationCredentials = Depends(bearer)) -> Dict[str, Any]:
+
+def require_auth(
+    creds: HTTPAuthorizationCredentials = Depends(bearer),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+
     if not creds or (creds.scheme or "").lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="não autenticado",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return decode_token(creds.credentials)
+
+    claims = decode_token(creds.credentials)
+    email = claims.get("sub")
+
+    member = (
+        db.query(TenantMember)
+        .filter(TenantMember.email == email)
+        .first()
+    )
+
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="usuário não pertence a tenant válido",
+        )
+
+    # INJETAR TENANT NA MESMA SESSÃO DO REQUEST
+    set_tenant_on_session(db, member.tenant_id)
+
+    return claims

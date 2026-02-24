@@ -10,29 +10,31 @@ from app.schemas.reports import TransactionBrief
 from app.models.company import Company
 from app.models.category import Category
 from app.models.transaction import Transaction
+from app.core.tenant import get_current_tenant_id
 from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionCategoryPatch, BulkCategorizeRequest, BulkCategorizeResponse
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 @router.post("", response_model=TransactionOut)
-def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db)):
+def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id)):
     # valida company
-    company = db.get(Company, payload.company_id)
+    company = db.scalar(select(Company).where(Company.id == payload.company_id).where(Company.tenant_id == tenant_id))
     if not company:
         raise HTTPException(status_code=404, detail="Empresa (company_id) nao existe")
 
     # valida categoria
-    cat = db.get(Category, payload.category_id)
+    cat = db.scalar(select(Category).where(Category.id == payload.category_id).where(Category.tenant_id == tenant_id))
     if not cat:
         raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
 
     t = Transaction(
+        tenant_id=tenant_id,
         company_id=payload.company_id,
         category_id=payload.category_id,
         kind=payload.kind,
         amount_cents=payload.amount_cents,
         description=payload.description or "",
-       occurred_at=getattr(payload, "occurred_at", None) or datetime.utcnow(),
+        occurred_at=getattr(payload, "occurred_at", None) or datetime.utcnow(),
  )
     db.add(t)
     db.commit()
@@ -40,10 +42,10 @@ def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db)
     return t
 
 @router.get("", response_model=list[TransactionOut])
-def list_transactions(company_id: int | None = None, db: Session = Depends(get_db)):
-    q = select(Transaction).order_by(Transaction.id.desc())
+def list_transactions(company_id: int | None = None, db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id)):
+    q = select(Transaction).where(Transaction.tenant_id == tenant_id).order_by(Transaction.id.desc())
     if company_id is not None:
-        q = q.where(Transaction.company_id == company_id)
+        q = q.where(Transaction.company_id == company_id).where(Transaction.tenant_id == tenant_id)
     return list(db.scalars(q))
 
 @router.get("/uncategorized", response_model=list[TransactionBrief])
@@ -54,14 +56,17 @@ def uncategorized(
     limit: int = Query(50, ge=1, le=200),
     include_no_match: bool = Query(False),
     offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id),
 ):
     """
     Lista transações sem categoria (category_id IS NULL) no período.
     Útil para limpeza de dados (data quality).
     """
     # valida empresa e período (reaproveita do reports)
-    rep._ensure_company(db, company_id)
+    company = db.scalar(select(Company).where(Company.id == company_id).where(Company.tenant_id == tenant_id));
+    
+    if not company:
+        raise HTTPException(status_code=404, detail="Empresa nao encontrada")
     start_dt, end_dt, _period = rep._resolve_period(start, end)
 
     q = (
@@ -73,7 +78,7 @@ def uncategorized(
             Transaction.category_id,
             Transaction.description,
         )
-        .where(Transaction.company_id == company_id)
+        .where(Transaction.company_id == company_id).where(Transaction.tenant_id == tenant_id)
         .where(Transaction.occurred_at >= start_dt)
         .where(Transaction.occurred_at <= end_dt)
         .where(Transaction.category_id.is_(None))
@@ -127,14 +132,14 @@ def _rules() -> list[dict[str, Any]]:
 # Alias público para testes/contratos (evita ImportError)
 RULES = _rules()
 
-def _ensure_categories_by_name(db: Session, company_id: int, names: list[str]) -> dict[str, int]:
+def _ensure_categories_by_name(db: Session, tenant_id: int, names: list[str]) -> dict[str, int]:
     # cria categorias que não existirem, e retorna mapa name->id
-    existing = list(db.scalars(select(Category)))
+    existing = list(db.scalars(select(Category).where(Category.tenant_id == tenant_id)))
     mp = {c.name: c.id for c in existing}
     changed = False
     for name in names:
         if name not in mp:
-            c = Category(name=name)
+            c = Category(name=name, tenant_id=tenant_id)
             db.add(c)
             db.flush()
             mp[name] = c.id
@@ -150,13 +155,16 @@ def suggest_categories(
     end: str | None = None,
     limit: int = Query(100, ge=1, le=500),
     include_no_match: bool = Query(False),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id),
 ):
     """
     Sugere categoria para transações sem categoria (rule-based).
     Retorna lista: {id, suggested_category_id, confidence, rule, description, provider, reason, signals}
     """
-    rep._ensure_company(db, company_id)
+    company = db.scalar(select(Company).where(Company.id == company_id).where(Company.tenant_id == tenant_id));
+    
+    if not company:
+        raise HTTPException(status_code=404, detail="Empresa nao encontrada")
     start_dt, end_dt, _period = rep._resolve_period(start, end)
 
     # pega uncategorized bruto (igual ao endpoint /uncategorized)
@@ -168,7 +176,7 @@ def suggest_categories(
             Transaction.kind,
             Transaction.occurred_at,
         )
-        .where(Transaction.company_id == company_id)
+        .where(Transaction.company_id == company_id).where(Transaction.tenant_id == tenant_id)
         .where(Transaction.occurred_at >= start_dt)
         .where(Transaction.occurred_at <= end_dt)
         .where(Transaction.category_id.is_(None))
@@ -179,7 +187,7 @@ def suggest_categories(
 
     rules = _rules()
     needed_names = sorted({r["category_name"] for r in rules})
-    cat_map = _ensure_categories_by_name(db, company_id, needed_names)
+    cat_map = _ensure_categories_by_name(db, tenant_id, needed_names)
 
     out = []
     for r in rows:
@@ -233,13 +241,16 @@ def apply_suggestions(
     end: str | None = None,
     limit: int = Query(200, ge=1, le=500),
     dry_run: bool = Query(False),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id),
 ):
     """
     Aplica sugestões de categoria (rule-based) para transações sem categoria no período.
     - dry_run=true: não altera nada, só retorna o que faria.
     """
-    rep._ensure_company(db, company_id)
+    company = db.scalar(select(Company).where(Company.id == company_id).where(Company.tenant_id == tenant_id));
+    
+    if not company:
+        raise HTTPException(status_code=404, detail="Empresa nao encontrada")
     start_dt, end_dt, _period = rep._resolve_period(start, end)
 
     suggestions = suggest_categories(
@@ -299,15 +310,18 @@ def set_transaction_category(
     tx_id: int,
     payload: TransactionCategoryPatch,
     company_id: int = Query(..., ge=1),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id),
 ):
-    rep._ensure_company(db, company_id)
+    company = db.scalar(select(Company).where(Company.id == company_id).where(Company.tenant_id == tenant_id));
+    
+    if not company:
+        raise HTTPException(status_code=404, detail="Empresa nao encontrada")
 
     tx = db.get(Transaction, tx_id)
     if not tx or tx.company_id != company_id:
         raise HTTPException(status_code=404, detail="Transacao nao existe para essa empresa")
 
-    cat = db.get(Category, payload.category_id)
+    cat = db.scalar(select(Category).where(Category.id == payload.category_id).where(Category.tenant_id == tenant_id))
     if not cat:
         raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
 
@@ -336,7 +350,7 @@ def bulk_categorize(payload: BulkCategorizeRequest, db: Session = Depends(get_db
     if len(company_ids) > 1:
         raise HTTPException(status_code=422, detail="Transacoes de empresas diferentes no mesmo lote")
 
-    cat = db.get(Category, payload.category_id)
+    cat = db.scalar(select(Category).where(Category.id == payload.category_id).where(Category.tenant_id == tenant_id))
     if not cat:
         raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
 

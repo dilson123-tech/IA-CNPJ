@@ -23,6 +23,7 @@ from app.models.transaction import Transaction
 from app.models.company import Company
 from app.models.category import Category
 from app.schemas.reports import CategoryBreakdown, ContextResponse, DailyResponse, Period, SummaryResponse, TopCategoriesResponse, Totals, TransactionBrief, DailyPoint
+from app.core.tenant import get_current_tenant_id
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -73,8 +74,9 @@ def _parse_iso_date_or_datetime(s: str, *, is_end: bool) -> datetime:
         return datetime(d.year, d.month, d.day, 23, 59, 59, 999999)
     return datetime(d.year, d.month, d.day, 0, 0, 0)
 
-def _ensure_company(db: Session, company_id: int) -> None:
-    if db.get(Company, company_id) is None:
+def _ensure_company(db: Session, company_id: int, tenant_id: int) -> None:
+    c = db.scalar(select(Company).where(Company.id == company_id).where(Company.tenant_id == tenant_id))
+    if c is None:
         raise HTTPException(status_code=404, detail={
             'error_code': 'COMPANY_NOT_FOUND',
             'company_id': company_id,
@@ -109,13 +111,14 @@ def _resolve_period(start: str | None, end: str | None) -> tuple[datetime, datet
     return start_dt, end_dt, period
 
 
-def _totals_row(db: Session, company_id: int, start_dt: datetime, end_dt: datetime) -> Totals:
+def _totals_row(db: Session, company_id: int, start_dt: datetime, end_dt: datetime, tenant_id: int) -> Totals:
     q = select(
         func.coalesce(func.sum(case((Transaction.kind == "in", Transaction.amount_cents), else_=0)), 0).label("in_cents"),
         func.coalesce(func.sum(case((Transaction.kind == "out", Transaction.amount_cents), else_=0)), 0).label("out_cents"),
         func.count(Transaction.id).label("cnt"),
     ).where(
         Transaction.company_id == company_id,
+        Transaction.tenant_id == tenant_id,
         Transaction.occurred_at.is_not(None),
         Transaction.occurred_at >= start_dt,
         Transaction.occurred_at <= end_dt,
@@ -133,7 +136,7 @@ def _totals_row(db: Session, company_id: int, start_dt: datetime, end_dt: dateti
     )
 
 
-def _by_category(db: Session, company_id: int, start_dt: datetime, end_dt: datetime) -> list[CategoryBreakdown]:
+def _by_category(db: Session, company_id: int, start_dt: datetime, end_dt: datetime, tenant_id: int) -> list[CategoryBreakdown]:
     total_cents = func.coalesce(func.sum(Transaction.amount_cents), 0).label("total_cents")
 
     q = (
@@ -149,6 +152,7 @@ def _by_category(db: Session, company_id: int, start_dt: datetime, end_dt: datet
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(
             Transaction.company_id == company_id,
+        Transaction.tenant_id == tenant_id,
             Transaction.occurred_at.is_not(None),
             Transaction.occurred_at >= start_dt,
             Transaction.occurred_at <= end_dt,
@@ -179,11 +183,12 @@ def summary(
     company_id: int = Query(..., ge=1),
     start: str | None = Query(None, description="YYYY-MM-DD ou ISO datetime"),
     end: str | None = Query(None, description="YYYY-MM-DD ou ISO datetime"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id),
 ):
     start_dt, end_dt, period = _resolve_period(start, end)
-    totals = _totals_row(db, company_id, start_dt, end_dt)
-    by_cat = _by_category(db, company_id, start_dt, end_dt)
+    _ensure_company(db, company_id, tenant_id)
+    totals = _totals_row(db, company_id, start_dt, end_dt, tenant_id)
+    by_cat = _by_category(db, company_id, start_dt, end_dt, tenant_id)
     return SummaryResponse(company_id=company_id, period=period, totals=totals, by_category=by_cat)
 
 
@@ -192,9 +197,10 @@ def daily(
     company_id: int = Query(..., ge=1),
     start: str | None = Query(None),
     end: str | None = Query(None),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id),
 ):
     start_dt, end_dt, period = _resolve_period(start, end)
+    _ensure_company(db, company_id, tenant_id)
 
     day = func.date(Transaction.occurred_at).label("day")
     q = (
@@ -205,6 +211,7 @@ def daily(
         )
         .where(
             Transaction.company_id == company_id,
+        Transaction.tenant_id == tenant_id,
             Transaction.occurred_at.is_not(None),
             Transaction.occurred_at >= start_dt,
             Transaction.occurred_at <= end_dt,
@@ -235,11 +242,12 @@ def context(
     start: str | None = Query(None),
     end: str | None = Query(None),
     limit: int = Query(20, ge=1, le=200),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id),
 ):
     start_dt, end_dt, period = _resolve_period(start, end)
-    totals = _totals_row(db, company_id, start_dt, end_dt)
-    by_cat = _by_category(db, company_id, start_dt, end_dt)
+    _ensure_company(db, company_id, tenant_id)
+    totals = _totals_row(db, company_id, start_dt, end_dt, tenant_id)
+    by_cat = _by_category(db, company_id, start_dt, end_dt, tenant_id)
 
     q = (
         select(
@@ -255,6 +263,7 @@ def context(
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(
             Transaction.company_id == company_id,
+        Transaction.tenant_id == tenant_id,
             Transaction.occurred_at.is_not(None),
             Transaction.occurred_at >= start_dt,
             Transaction.occurred_at <= end_dt,
@@ -293,11 +302,12 @@ def top_categories(
     end: str | None = None,
     metric: str = "saidas",
     limit: int = 5,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id),
 ):
-    _ensure_company(db, company_id)
+    _ensure_company(db, company_id, tenant_id)
     start_dt, end_dt, period = _resolve_period(start, end)
-    items = _by_category(db, company_id, start_dt, end_dt)
+    _ensure_company(db, company_id, tenant_id)
+    items = _by_category(db, company_id, start_dt, end_dt, tenant_id)
 
     m = (metric or "saidas").lower().strip()
     if m not in ("entradas", "saidas", "saldo"):
