@@ -25,6 +25,7 @@ from app.api.transaction import apply_suggestions as tx_apply_suggestions
 from app.models.transaction import Transaction
 
 
+from app.core.tenant import get_current_tenant_id
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 logger = logging.getLogger(__name__)
@@ -37,27 +38,21 @@ def _fmt_brl(cents: int) -> str:
 
 
 @router.post("/consult", response_model=AiConsultResponse)
-def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(get_db)):
+def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(get_db), tenant_id: int = Depends(rep.get_current_tenant_id)):
     request_id = request.headers.get('x-request-id') or uuid4().hex
     t0 = perf_counter()
     try:
-        rep._ensure_company(db, payload.company_id)
+        tenant_id = get_current_tenant_id()
+        rep._ensure_company(db, payload.company_id, get_current_tenant_id())
         # reaproveita helpers do reports (mesma lógica do período)
         start_dt, end_dt, period = rep._resolve_period(payload.start, payload.end)
-        totals: Totals = rep._totals_row(db, payload.company_id, start_dt, end_dt)
-        by_cat = rep._by_category(db, payload.company_id, start_dt, end_dt)
+        totals: Totals = rep._totals_row(db, payload.company_id, start_dt, end_dt, tenant_id)
+        by_cat = rep._by_category(db, payload.company_id, start_dt, end_dt, tenant_id)
         # sem categoria (derivado de by_cat) — usado no score
         semcat = next((c for c in by_cat if getattr(c, 'category_id', None) is None), None)
 
 
         # recentes (mesma query do context)
-        ctx = rep.context(
-            company_id=payload.company_id,
-            start=payload.start,
-            end=payload.end,
-            limit=payload.limit,
-            db=db,
-        )
 
         # -----------------------------
         # Motor v1: diagnóstico mais forte (sem mudar o schema)
@@ -82,13 +77,46 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
             prev_start_dt = datetime(prev_start.year, prev_start.month, prev_start.day, 0, 0, 0)
             prev_end_dt = datetime(prev_end.year, prev_end.month, prev_end.day, 23, 59, 59, 999999)
 
-            totals_prev: Totals = rep._totals_row(db, payload.company_id, prev_start_dt, prev_end_dt)
+            totals_prev: Totals = rep._totals_row(db, payload.company_id, prev_start_dt, prev_end_dt, tenant_id)
             prev_saidas = int(getattr(totals_prev, "saidas_cents", 0) or 0)
             prev_entradas = int(getattr(totals_prev, "entradas_cents", 0) or 0)
         except Exception:
             totals_prev = None
             prev_saidas = 0
             prev_entradas = 0
+
+        # recentes (igual ao reports.context, mas sem chamar endpoint)
+        q_recent = (
+            select(
+                Transaction.id,
+                Transaction.occurred_at,
+                Transaction.kind,
+                Transaction.amount_cents,
+                Transaction.category_id,
+                Transaction.description,
+            )
+            .where(
+                Transaction.company_id == payload.company_id,
+                Transaction.tenant_id == tenant_id,
+                Transaction.occurred_at.is_not(None),
+                Transaction.occurred_at >= start_dt,
+                Transaction.occurred_at <= end_dt,
+            )
+            .order_by(Transaction.occurred_at.desc())
+            .limit(payload.limit)
+        )
+
+        recent_transactions = [
+            {
+                "id": r.id,
+                "occurred_at": r.occurred_at,
+                "kind": r.kind,
+                "amount_cents": int(r.amount_cents),
+                "category_id": r.category_id,
+                "description": r.description or "",
+            }
+            for r in db.execute(q_recent).all()
+        ]
 
         # top saídas por categoria (percentual)
         by_out = sorted(by_cat or [], key=lambda c: int(getattr(c, "saidas_cents", 0) or 0), reverse=True)
@@ -557,7 +585,7 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
             actions=actions,
             numbers=totals,
             top_categories=top_categories,
-            recent_transactions=ctx.recent_transactions[:20],  # já vem no formato schema
+            recent_transactions=recent_transactions[:20],  # já vem no formato schema
         )
 
     except HTTPException:
@@ -704,7 +732,7 @@ def ai_apply_suggestions(payload: AIApplySuggestionsRequest, db: Session = Depen
     # Facade IA: reaproveita Data Quality do /transactions.
     # include_no_match só faz sentido no dry_run (debug/triagem), pq no apply não tem o que aplicar em no_match.
     try:
-        rep._ensure_company(db, payload.company_id)
+        rep._ensure_company(db, payload.company_id, get_current_tenant_id())
         start_dt, end_dt, _period = rep._resolve_period(payload.start, payload.end)
 
         if payload.dry_run and payload.include_no_match:

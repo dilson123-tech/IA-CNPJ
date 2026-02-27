@@ -1,1 +1,2 @@
 ruff
+passlib>=1.7.4

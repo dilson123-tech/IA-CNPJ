@@ -1,15 +1,12 @@
 import secrets
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.settings import settings
-from app.auth.jwt import create_access_token, require_auth
-
-try:
-    from passlib.hash import pbkdf2_sha256
-except Exception:
-    pbkdf2_sha256 = None  # fallback
-
+from app.core.security import create_access_token, require_auth
+from app.deps import get_db
+from app.models.tenant import TenantMember
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -24,34 +21,43 @@ class TokenOut(BaseModel):
     token_type: str = "bearer"
 
 
-def _verify_password(pw: str) -> bool:
-    # Prefer hash
-    ph = str(getattr(settings, "AUTH_PASSWORD_HASH", "") or "").strip()
-    if ph:
-        if pbkdf2_sha256 is None:
-            raise RuntimeError("SECURITY: AUTH_PASSWORD_HASH definido mas passlib não está disponível")
-        return pbkdf2_sha256.verify(pw, ph)
-
-    # Fallback: plaintext (ok pra lab; em prod prefira HASH)
-    plain = str(getattr(settings, "AUTH_PASSWORD", "") or "")
-    return secrets.compare_digest(pw, plain)
+def verify_password(pw: str) -> bool:
+    # Simplificação temporária: senha global
+    expected = str(getattr(settings, "AUTH_PASSWORD", "") or "")
+    return secrets.compare_digest(pw, expected)
 
 
 @router.post("/login", response_model=TokenOut)
-def login(payload: LoginIn):
+def login(payload: LoginIn, db: Session = Depends(get_db)):
     if not bool(getattr(settings, "AUTH_ENABLED", False)):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Auth disabled")
-    user = str(getattr(settings, "AUTH_USERNAME", "") or "").strip()
-    if not secrets.compare_digest(payload.username.strip(), user):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(status_code=400, detail="Auth disabled")
 
-    if not _verify_password(payload.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    member = (
+        db.query(TenantMember)
+        .filter(TenantMember.email == payload.username.strip())
+        .first()
+    )
 
-    token = create_access_token(sub=user)
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
+    if not verify_password(payload.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
+    token = create_access_token(sub=member.email)
     return TokenOut(access_token=token)
 
 
 @router.get("/me")
 def me(claims=Depends(require_auth)):
-    return {"sub": claims.get("sub"), "iat": claims.get("iat"), "exp": claims.get("exp")}
+    return {
+        "sub": claims.get("sub"),
+        "iat": claims.get("iat"),
+        "exp": claims.get("exp"),
+    }
