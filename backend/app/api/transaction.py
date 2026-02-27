@@ -350,6 +350,7 @@ def bulk_categorize(payload: BulkCategorizeRequest, db: Session = Depends(get_db
     if len(company_ids) > 1:
         raise HTTPException(status_code=422, detail="Transacoes de empresas diferentes no mesmo lote")
 
+    tenant_id = get_current_tenant_id()
     cat = db.scalar(select(Category).where(Category.id == payload.category_id).where(Category.tenant_id == tenant_id))
     if not cat:
         raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")

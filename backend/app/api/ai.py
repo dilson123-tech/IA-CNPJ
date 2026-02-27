@@ -25,6 +25,7 @@ from app.api.transaction import apply_suggestions as tx_apply_suggestions
 from app.models.transaction import Transaction
 
 
+from app.core.tenant import get_current_tenant_id
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,8 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
     request_id = request.headers.get('x-request-id') or uuid4().hex
     t0 = perf_counter()
     try:
-        rep._ensure_company(db, payload.company_id, tenant_id)
+        tenant_id = get_current_tenant_id()
+        rep._ensure_company(db, payload.company_id, get_current_tenant_id())
         # reaproveita helpers do reports (mesma lógica do período)
         start_dt, end_dt, period = rep._resolve_period(payload.start, payload.end)
         totals: Totals = rep._totals_row(db, payload.company_id, start_dt, end_dt, tenant_id)
@@ -730,7 +732,7 @@ def ai_apply_suggestions(payload: AIApplySuggestionsRequest, db: Session = Depen
     # Facade IA: reaproveita Data Quality do /transactions.
     # include_no_match só faz sentido no dry_run (debug/triagem), pq no apply não tem o que aplicar em no_match.
     try:
-        rep._ensure_company(db, payload.company_id, tenant_id)
+        rep._ensure_company(db, payload.company_id, get_current_tenant_id())
         start_dt, end_dt, _period = rep._resolve_period(payload.start, payload.end)
 
         if payload.dry_run and payload.include_no_match:
