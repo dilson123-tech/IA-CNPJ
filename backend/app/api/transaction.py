@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -34,7 +34,7 @@ def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db)
         kind=payload.kind,
         amount_cents=payload.amount_cents,
         description=payload.description or "",
-        occurred_at=getattr(payload, "occurred_at", None) or datetime.utcnow(),
+        occurred_at=getattr(payload, "occurred_at", None) or datetime.now(timezone.utc).replace(tzinfo=None),
  )
     db.add(t)
     db.commit()

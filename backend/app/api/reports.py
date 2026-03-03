@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -84,7 +84,7 @@ def _ensure_company(db: Session, company_id: int, tenant_id: int) -> None:
         })
 
 def _resolve_period(start: str | None, end: str | None) -> tuple[datetime, datetime, Period]:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if start is None and end is None:
         end_dt = now
@@ -346,7 +346,7 @@ def _build_pdf_bytes(title: str, payload: dict, consult: dict) -> bytes:
     c.drawString(20*mm, height - 20*mm, title)
 
     c.setFont(font, 10)
-    generated_at = _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    generated_at = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00","Z")
     y = height - 30*mm
     c.drawString(20*mm, y, f"Gerado em: {generated_at}")
     y -= 8*mm

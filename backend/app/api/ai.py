@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from uuid import uuid4
 
@@ -575,7 +575,7 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
         return AiConsultResponse(
             company_id=payload.company_id,
             period=period,
-            generated_at=datetime.utcnow(),
+            generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
             headline=headline,
             insights=insights,
             risks=risks,
