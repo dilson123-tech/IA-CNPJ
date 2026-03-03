@@ -4,15 +4,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from passlib.hash import pbkdf2_sha256
 import jwt
 
 from app.core.settings import settings
 from app.deps import get_db
-from app.models.tenant import TenantMember
 from app.tenant_context import set_tenant_on_session
+import secrets
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -24,8 +24,16 @@ def hash_password(plain: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     if not hashed:
         return False
-    return pbkdf2_sha256.verify(plain, hashed)
 
+    # Hash (passlib) normalmente começa com '$'
+    if isinstance(hashed, str) and hashed.startswith("$"):
+        try:
+            return pbkdf2_sha256.verify(plain, hashed)
+        except Exception:
+            return False
+
+    # Dev/CI: senha em texto puro
+    return secrets.compare_digest(str(plain), str(hashed))
 
 def _secret() -> str:
     sec = getattr(settings, "AUTH_JWT_SECRET", "") or ""
@@ -36,16 +44,29 @@ def _secret() -> str:
     return sec
 
 
-def create_access_token(sub: str, ttl_s: int | None = None) -> str:
-    ttl = int(ttl_s or getattr(settings, "AUTH_ACCESS_TOKEN_TTL_S", 3600))
+def create_access_token(sub: str, tenant_id: int | None = None) -> str:
+    # token simples e estável (CI/DEV/PROD)
+    import os
+
     now = datetime.now(timezone.utc)
-    payload: Dict[str, Any] = {
+    exp = now + timedelta(minutes=int(getattr(settings, "AUTH_JWT_EXPIRES_MINUTES", 60)))
+    payload = {
         "sub": sub,
         "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(seconds=ttl)).timestamp()),
+        "exp": int(exp.timestamp()),
     }
-    return jwt.encode(payload, _secret(), algorithm="HS256")
+    if tenant_id is not None:
+        payload["tenant_id"] = int(tenant_id)
 
+    secret = (
+        os.getenv("IA_CNPJ_AUTH_JWT_SECRET")
+        or os.getenv("AUTH_JWT_SECRET")
+        or getattr(settings, "AUTH_JWT_SECRET", "")
+    )
+    if not secret:
+        raise RuntimeError("AUTH_JWT_SECRET vazio")
+
+    return jwt.encode(payload, secret, algorithm="HS256")
 
 def decode_token(token: str) -> Dict[str, Any]:
     try:
@@ -65,33 +86,57 @@ def decode_token(token: str) -> Dict[str, Any]:
 
 
 def require_auth(
-    creds: HTTPAuthorizationCredentials = Depends(bearer),
+    credentials=Depends(bearer),
     db: Session = Depends(get_db),
-) -> Dict[str, Any]:
+):
+    # auth ON?
+    import os
+    from fastapi import HTTPException
 
-    if not creds or (creds.scheme or "").lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="não autenticado",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    enabled_raw = (
+        os.getenv("IA_CNPJ_AUTH_ENABLED")
+        or os.getenv("AUTH_ENABLED")
+        or str(getattr(settings, "AUTH_ENABLED", "false"))
+    ).strip().lower()
+    enabled = enabled_raw in ("1", "true", "yes", "on")
 
-    claims = decode_token(creds.credentials)
-    email = claims.get("sub")
+    if not enabled:
+        raise HTTPException(status_code=400, detail="Auth disabled")
 
-    member = (
-        db.query(TenantMember)
-        .filter(TenantMember.email == email)
-        .first()
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Missing token")
+
+    token = getattr(credentials, "credentials", None) or ""
+    secret = (
+        os.getenv("IA_CNPJ_AUTH_JWT_SECRET")
+        or os.getenv("AUTH_JWT_SECRET")
+        or getattr(settings, "AUTH_JWT_SECRET", "")
     )
+    try:
+        claims = jwt.decode(token, secret, algorithms=["HS256"])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-    if not member:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="usuário não pertence a tenant válido",
-        )
+    sub = (claims.get("sub") or "").strip()
+    tenant_id = claims.get("tenant_id", None)
 
-    # INJETAR TENANT NA MESMA SESSÃO DO REQUEST
-    set_tenant_on_session(db, member.tenant_id)
+    # Se tenant_id não veio no JWT, resolve via DB pelo sub (email)
+    if tenant_id in (None, "", 0):
+        try:
+            from app.models.tenant import TenantMember
+            m = db.query(TenantMember).filter(TenantMember.email == sub).first()
+            if m:
+                tenant_id = m.tenant_id
+        except Exception:
+            tenant_id = None
 
+    if tenant_id in (None, "", 0):
+        raise HTTPException(status_code=401, detail="Missing tenant_id")
+
+    tenant_id = int(tenant_id)
+    claims["tenant_id"] = tenant_id
+
+    # seta tenant no contexto da sessão (Postgres RLS / SQLite info)
+    set_tenant_on_session(db, tenant_id)
     return claims
+

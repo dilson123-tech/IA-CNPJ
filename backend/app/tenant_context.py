@@ -10,6 +10,6 @@ def set_tenant_on_session(db: Session, tenant_id: int) -> None:
     """
     dialect = db.get_bind().dialect.name
     if str(dialect).startswith("postgres"):
-        db.execute(text("SET app.tenant_id = :tid"), {"tid": str(tenant_id)})
+        db.execute(text("SELECT set_config(\'app.tenant_id\', :tid, true)"), {"tid": str(int(tenant_id))})
     else:
         db.info["tenant_id"] = tenant_id

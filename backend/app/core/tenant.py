@@ -37,7 +37,7 @@ def get_current_tenant_id(
 
     dialect = db.get_bind().dialect.name
     if str(dialect).startswith("postgres"):
-        db.execute(text("SET app.tenant_id = :tid"), {"tid": str(member.tenant_id)})
+        db.execute(text("SELECT set_config(\'app.tenant_id\', :tid, true)"), {"tid": str(int(member.tenant_id))})
     else:
         db.info["tenant_id"] = member.tenant_id
 
