@@ -41,10 +41,13 @@ app.include_router(auth_router)
 
 # Routers protegidos quando AUTH_ENABLED=true
 app.include_router(company_router, dependencies=PROTECTED_DEPS)
+app.include_router(company_router, prefix="/api/v1", dependencies=PROTECTED_DEPS)
 app.include_router(category_router, dependencies=PROTECTED_DEPS)
 app.include_router(transaction_router, dependencies=PROTECTED_DEPS)
+app.include_router(transaction_router, prefix="/api/v1", dependencies=PROTECTED_DEPS)
 app.include_router(reports_router, dependencies=PROTECTED_DEPS)
 app.include_router(ai_router, dependencies=PROTECTED_DEPS)
+app.include_router(ai_router, prefix="/api/v1", dependencies=PROTECTED_DEPS)
 
 
 @app.get("/health")

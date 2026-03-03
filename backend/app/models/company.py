@@ -8,3 +8,4 @@ class Company(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     cnpj: Mapped[str] = mapped_column(String(14), unique=True, index=True)
     razao_social: Mapped[str] = mapped_column(String(200))
+    tenant_id: Mapped[int] = mapped_column(nullable=False, index=True)
