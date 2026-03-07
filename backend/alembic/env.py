@@ -33,7 +33,20 @@ def _normalize_sqlite_url(url: str) -> str:
             return "sqlite:////" + path.lstrip("/")
     return url
 
-config.set_main_option("sqlalchemy.url", _normalize_sqlite_url(settings.DATABASE_URL))
+
+def _get_db_url() -> str:
+    """Resolve DB URL para Alembic.
+
+    Prioriza parâmetro -x db_url=..., depois settings.DATABASE_URL.
+    """
+    x_args = context.get_x_argument(as_dictionary=True)
+    override = x_args.get("db_url")
+    if override:
+        return override
+    return settings.DATABASE_URL
+
+
+config.set_main_option("sqlalchemy.url", _normalize_sqlite_url(_get_db_url()))
 # --- end ---
 
 

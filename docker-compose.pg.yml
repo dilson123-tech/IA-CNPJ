@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  ia_cnpj_pg:
+    image: postgres:16
+    container_name: ia-cnpj-pg
+    environment:
+      POSTGRES_DB: ia_cnpj
+      POSTGRES_USER: ia_cnpj
+      POSTGRES_PASSWORD: ia_cnpj
+    ports:
+      # Porta externa 55432 -> interna 5432
+      - "55532:5432"
+    volumes:
+      - ia_cnpj_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ia_cnpj -d ia_cnpj"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  ia_cnpj_pg_data:
