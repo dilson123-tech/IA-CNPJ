@@ -78,7 +78,7 @@ def client():
 def auth_header(client):
     r = client.post(
         "/auth/login",
-        json={"username": "dev", "password": "dev"},
+        json={"username": "userA@teste.com", "password": "dev"},
     )
     token = r.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

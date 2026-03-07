@@ -8,7 +8,7 @@ client = TestClient(app)
 def get_auth_headers():
     resp = client.post(
         "/auth/login",
-        json={"username": "dev", "password": "dev"},
+        json={"username": "userA@teste.com", "password": "dev"},
     )
     assert resp.status_code == 200
     token = resp.json()["access_token"]
