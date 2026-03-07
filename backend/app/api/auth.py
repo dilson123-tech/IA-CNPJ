@@ -88,7 +88,7 @@ def _lab_seed_if_needed(db: Session) -> None:
             from app.models.tenant import Tenant, TenantMember
             for mdl in (Tenant, TenantMember):
                 mdl.__table__.create(bind=bind, checkfirst=True)
-        except Exception as e:
+        except Exception:
             if seed_strict:
                 raise
             return
@@ -102,7 +102,7 @@ def _lab_seed_if_needed(db: Session) -> None:
             from app.models.tenant import Tenant, TenantMember  # type: ignore
             Tenant.__table__.create(bind=bind, checkfirst=True)
             TenantMember.__table__.create(bind=bind, checkfirst=True)
-        except Exception as e:
+        except Exception:
             if seed_strict:
                 raise
             return
@@ -134,7 +134,7 @@ def _lab_seed_if_needed(db: Session) -> None:
         vals = ", ".join([f":{k}" for k in data.keys()])
         try:
             db.execute(text(f"INSERT INTO {table} ({keys}) VALUES ({vals})"), data)
-        except Exception as e:
+        except Exception:
             if seed_strict:
                 raise
             return
