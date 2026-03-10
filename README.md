@@ -1,113 +1,130 @@
-# IA-CNPJ (Consultoria Financeira com IA)
+# IA-CNPJ
 
-Produto robusto (comercial) focado em CNPJ/MEI: diagnóstico financeiro, alertas, relatórios e consultoria assistida por IA.
-Este repositório é separado do Aurea Gold para manter estabilidade, compliance e evolução organizada.
+Plataforma de consultoria financeira assistida por IA para **CNPJ e MEI**, com foco em **diagnóstico financeiro, categorização de lançamentos, relatórios e apoio operacional**.
 
-## Estrutura
-- backend/  -> API (FastAPI) + regras/serviços + integrações
-- frontend/ -> Painel web (futuro: app)
-- docs/     -> governança (roadmap, decisões, escopo)
-- scripts/  -> automações de dev
+O projeto foi separado do **Aurea Gold** para manter **estabilidade, compliance, governança e evolução organizada**.
 
-## Regras (anti-bagunça)
-1. Mudanças seguem o PDF Diário (8h). Ideias fora disso entram no Backlog.
-2. Um comando por vez + testes determinísticos (curl) antes de UI.
-3. LAB ≠ PROD. Nada quebra o estável.
+---
 
-## Data Quality (categorias)
+## Visão do produto
 
-> **Dica:** por padrão, o endpoint **não retorna** itens com `rule=no_match`.
-> Para listar também os sem match (debug/triagem), use `include_no_match=true`.
+O **IA-CNPJ** é um MVP técnico-comercial construído para ajudar empresas a organizar dados financeiros, categorizar movimentações, gerar análises e preparar terreno para consultoria assistida por IA.
 
-### Listar transações sem categoria
-```bash
-curl -sS "http://127.0.0.1:8100/transactions/uncategorized?company_id=1&start=2026-01-01&end=2026-01-31&limit=50" | jq
-```
+Hoje o projeto já entrega uma base sólida de backend com:
 
-### Setar categoria de uma transação (PATCH)
-```bash
-curl -sS -X PATCH "http://127.0.0.1:8100/transactions/3/category?company_id=1" \
-  -H 'Content-Type: application/json' \
-  -d '{"category_id":1}' | jq
-```
+- autenticação
+- isolamento multi-tenant
+- cadastro de empresas
+- cadastro de categorias
+- lançamentos financeiros
+- relatórios
+- fluxo de sugestão e aplicação de categorias
+- esteira de CI com testes, smoke e contratos
 
-### Categorizar em lote (bulk-categorize)
-**Formato suportado:** `items: [{id, category_id}]`
-```bash
-curl -sS "http://127.0.0.1:8100/transactions/uncategorized?company_id=1&start=2026-01-01&end=2026-01-31&limit=200" \
-| jq '{company_id: 1, items: map({id: .id, category_id: 1})}' \
-| curl -sS -X POST "http://127.0.0.1:8100/transactions/bulk-categorize" \
-  -H 'Content-Type: application/json' -d @- | jq
-```
+---
 
-### Aplicar sugestões automaticamente (1 comando)
-- Faz **dry-run** (mostra quantas seriam categorizadas)
-- Depois **aplica** de verdade (atualiza no banco)
+## Público-alvo
 
-```bash
-API="http://127.0.0.1:8100"
+- MEI
+- pequenas empresas
+- operações que precisam organizar lançamentos e relatórios
+- consultorias financeiras que querem uma base SaaS para evolução futura
 
-# dry-run (não altera nada)
-curl -sS -X POST \
-"$API/transactions/apply-suggestions?company_id=1&start=2026-01-01&end=2026-01-31&limit=200&dry_run=true" | jq
+---
 
-# apply (altera)
-curl -sS -X POST \
-"$API/transactions/apply-suggestions?company_id=1&start=2026-01-01&end=2026-01-31&limit=200" | jq
-```
+## O que o MVP já entrega
 
-## Smoke tests (AI suggest/apply)
+### Backend / API
+- API em **FastAPI**
+- autenticação por token
+- suporte a multi-tenant
+- isolamento de dados por tenant
+- contratos validados por testes
+- smoke tests para fluxo principal
 
-Esse teste garante que o fluxo **AI → sugerir categoria → aplicar categoria** está funcionando de ponta a ponta,
-de forma **determinística** (valida pelo `TX_ID` criado no próprio smoke).
+### Domínio atual
+- empresas
+- categorias
+- transações
+- relatórios
+- sugestões de categorização
+- aplicação em lote de categorias
 
-**Pré-requisitos**
-- Backend rodando em `http://127.0.0.1:8100`
-- `curl` e `jq` instalados
+### Qualidade e governança
+- CI com:
+  - lint
+  - settings contract
+  - smoke
+  - tests
+- separação entre LAB e PROD
+- fluxo protegido por pull request na branch `main`
 
-**Rodar**
+---
+
+## Estrutura do repositório
+
+- `backend/` → API FastAPI, regras de negócio, integrações, testes e scripts
+- `frontend/` → painel web em evolução
+- `docs/` → governança, roadmap, decisões e escopo
+- `scripts/` → automações auxiliares de desenvolvimento
+
+---
+
+## Estado atual do MVP
+
+### Já validado
+- auth multi-tenant em ambiente LAB
+- contracts principais de companies
+- contrato de `transactions.kind` padronizado em `in/out`
+- relatórios por período
+- data quality para transações sem categoria
+- suggest/apply de categorias
+- smoke CI-like com banco zerado
+- CI verde com branch protection
+
+### Em evolução
+- painel frontend mais completo
+- experiência de onboarding do produto
+- empacotamento comercial do MVP
+- expansão das rotinas de consultoria com IA
+
+---
+
+## Regras operacionais do projeto
+
+1. **LAB ≠ PROD**  
+   Nada quebra o ambiente estável.
+
+2. **Um comando por vez**  
+   Primeiro validação determinística, depois interface.
+
+3. **Mudança relevante passa por teste e PR**  
+   A branch `main` é protegida.
+
+---
+
+## Contratos importantes
+
+### `transactions.kind`
+O contrato oficial de transações aceita apenas:
+
+- `in` → entrada
+- `out` → saída
+
+Valores como `income` e `expense` **não fazem parte do contrato atual** e devem ser rejeitados.
+
+---
+
+## Como rodar localmente
+
+### Pré-requisitos
+- Python 3.12+
+- ambiente virtual `.venv`
+- `curl`
+- `jq`
+
+### Rodando backend
 ```bash
 cd backend
-bash -n scripts/smoke_ai_apply.sh && echo "BASH OK ✅"
-./scripts/smoke_ai_apply.sh
-```
-
-**O que valida**
-- `/health` responde OK
-- cria uma transação **sem categoria** com tag `__SMOKE_AI__...`
-- `/ai/suggest-categories` retorna sugestão para aquele `TX_ID`
-- `/ai/apply-suggestions` aplica e o `TX_ID` fica com `category_id` esperado
-
-**Config via env (opcional)**
-```bash
-API=http://127.0.0.1:8100 COMPANY_ID=1 START=2026-01-01 END=2026-01-31 LIMIT=200 ./scripts/smoke_ai_apply.sh
-```
-- trigger CI checks for branch protection
-
-## Smoke (CI / local) — DB-zerado proof ✅
-
-Este repo tem smoke tests “à prova de DB zerado”: se `COMPANY_ID` não existir, os scripts fazem **seed/lookup por CNPJ** e seguem o baile.
-
-### Scripts
-- `backend/scripts/dev_up_smoke.sh`  
-  Sobe a API (migrations + uvicorn) e roda:
-  - `backend/scripts/smoke.sh` (core + contrato mínimo do `/ai/consult`)
-  - `backend/scripts/smoke_ai_apply.sh` (AI suggest/apply + idempotência)
-
-- `backend/scripts/smoke.sh`  
-  Hardening: valida **HTTP 2xx + JSON**, **fail-fast**, preflight `ensure_company` (seed/lookup por CNPJ) e `bulk-categorize` vira **skip** quando não há `uncategorized`.
-
-- `backend/scripts/smoke_ai_apply.sh`  
-  Garante empresa (seed idempotente), cria uma transação `category_id=null`, roda suggest/apply e checa idempotência.
-
-### Como rodar
-    # padrão
-    bash backend/scripts/dev_up_smoke.sh
-
-    # DB-zerado proof (company inexistente)
-    COMPANY_ID=999999 bash backend/scripts/dev_up_smoke.sh
-
-    # período custom
-    START=2026-01-01 END=2026-01-31 bash backend/scripts/dev_up_smoke.sh
-
-
+source .venv/bin/activate
+uvicorn app.main:app --reload --port 8110
