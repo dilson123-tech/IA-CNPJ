@@ -1,10 +1,11 @@
 from pydantic import BaseModel, ConfigDict
+from typing import Literal
 from datetime import datetime
 
 
 class TransactionCreate(BaseModel):
     company_id: int
-    kind: str
+    kind: Literal["in", "out"]
     amount_cents: int
     description: str | None = ""
     occurred_at: datetime | None = None
@@ -14,7 +15,7 @@ class TransactionCreate(BaseModel):
 class TransactionOut(BaseModel):
     id: int
     company_id: int
-    kind: str
+    kind: Literal["in", "out"]
     amount_cents: int
     description: str
     occurred_at: datetime | None
