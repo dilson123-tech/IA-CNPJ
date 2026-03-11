@@ -16,6 +16,7 @@ from app.api import reports as rep
 from app.core.tenant import get_current_tenant_id
 from app.deps import get_db
 from app.models.transaction import Transaction
+from app.models.category import Category
 from app.schemas.ai import (
     AiConsultRequest,
     AiConsultResponse,
@@ -90,8 +91,11 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
                 Transaction.kind,
                 Transaction.amount_cents,
                 Transaction.category_id,
+                func.coalesce(Category.name, "Sem categoria").label("category_name"),
                 Transaction.description,
             )
+            .select_from(Transaction)
+            .outerjoin(Category, Category.id == Transaction.category_id)
             .where(
                 Transaction.company_id == payload.company_id,
                 Transaction.tenant_id == tenant_id,
@@ -110,6 +114,7 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
                 "kind": r.kind,
                 "amount_cents": int(r.amount_cents),
                 "category_id": r.category_id,
+                "category_name": str(r.category_name),
                 "description": r.description or "",
             }
             for r in db.execute(q_recent).all()
