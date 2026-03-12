@@ -38,6 +38,7 @@ app = FastAPI(
 
 # Auth router sempre exposto (login precisa existir)
 app.include_router(auth_router)
+app.include_router(auth_router, prefix="/api/v1")
 
 # Routers protegidos quando AUTH_ENABLED=true
 app.include_router(company_router, dependencies=PROTECTED_DEPS)
