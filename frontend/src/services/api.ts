@@ -186,3 +186,67 @@ export async function getReportContext(params: {
     }
   );
 }
+
+export type AIConsultNumbers = {
+  entradas_cents: number;
+  saidas_cents: number;
+  saldo_cents: number;
+  qtd_transacoes: number;
+};
+
+export type AIConsultTopCategory = {
+  category_id?: number | null;
+  category_name: string;
+  entradas_cents: number;
+  saidas_cents: number;
+  saldo_cents: number;
+  qtd_transacoes: number;
+};
+
+export type AIConsultRecentTransaction = {
+  id: number;
+  occurred_at?: string | null;
+  kind: string;
+  amount_cents: number;
+  category_id?: number | null;
+  category_name: string;
+  description: string;
+};
+
+export type AIConsultResponse = {
+  company_id: number;
+  period: ReportPeriod;
+  generated_at: string;
+  headline: string;
+  insights: string[];
+  risks: string[];
+  actions: string[];
+  numbers: AIConsultNumbers;
+  top_categories: AIConsultTopCategory[];
+  recent_transactions: AIConsultRecentTransaction[];
+};
+
+export async function getAIConsult(params: {
+  company_id: number;
+  start?: string;
+  end?: string;
+  limit?: number;
+  question?: string;
+}): Promise<AIConsultResponse> {
+  const payload = {
+    company_id: params.company_id,
+    period: {
+      start: params.start,
+      end: params.end,
+    },
+    limit: params.limit ?? 20,
+    ...(params.question ? { question: params.question } : {}),
+  };
+
+  return request<AIConsultResponse>('/api/v1/ai/consult', {
+    method: 'POST',
+    auth: true,
+    body: JSON.stringify(payload),
+  });
+}
+
