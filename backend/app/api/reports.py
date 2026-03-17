@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from fastapi import Body, Request, Response
-import httpx
 from io import BytesIO
 import os
 import datetime as _dt
@@ -18,12 +17,14 @@ from reportlab.pdfbase.ttfonts import TTFont
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, select
 
-from app.db import get_db
+from app.deps import get_db
 from app.models.transaction import Transaction
 from app.models.company import Company
 from app.models.category import Category
+from app.schemas.ai import AiConsultRequest
 from app.schemas.reports import CategoryBreakdown, ContextResponse, DailyResponse, Period, SummaryResponse, TopCategoriesResponse, Totals, TransactionBrief, DailyPoint
 from app.core.tenant import get_current_tenant_id
+from app.services.ai_consult_service import run_ai_consult
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -493,41 +494,41 @@ def _build_pdf_bytes(title: str, payload: dict, consult: dict) -> bytes:
 
 @router.post(
     "/ai-consult/pdf",
-    summary="Gera PDF do /ai/consult (proxy)",
+    summary="Gera PDF do /ai/consult (serviço interno)",
     responses={200: {"content": {"application/pdf": {}}}},
 )
-async def report_ai_consult_pdf(request: Request, payload: dict = Body(...)):
-    base = str(request.base_url).rstrip("/")
-    root = request.scope.get("root_path", "") or ""
-    url = f"{base}{root}/ai/consult"
-
-    # compat: /reports/ai-consult/pdf aceita {'period': {'start','end'}};
-    # /ai/consult espera start/end no topo.
+async def report_ai_consult_pdf(
+    request: Request,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant_id),
+):
     payload_in = payload or {}
     payload_consult = dict(payload_in)
-    _p = payload_consult.get('period') or {}
+
+    _p = payload_consult.get("period") or {}
     if isinstance(_p, dict):
-        if 'start' not in payload_consult and _p.get('start'):
-            payload_consult['start'] = _p.get('start')
-        if 'end' not in payload_consult and _p.get('end'):
-            payload_consult['end'] = _p.get('end')
-    payload_consult.pop('period', None)
+        if "start" not in payload_consult and _p.get("start"):
+            payload_consult["start"] = _p.get("start")
+        if "end" not in payload_consult and _p.get("end"):
+            payload_consult["end"] = _p.get("end")
+    payload_consult.pop("period", None)
 
-    headers = {}
-    auth = request.headers.get("authorization")
-    if auth:
-        headers["authorization"] = auth
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(url, json=payload_consult, headers=headers)
-
-    if r.status_code != 200:
+    try:
+        consult_payload = AiConsultRequest(**payload_consult)
+        consult = run_ai_consult(
+            db=db,
+            payload=consult_payload,
+            tenant_id=tenant_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
             status_code=502,
-            detail={"msg": "falha ao chamar /ai/consult", "status": r.status_code, "body": r.text[:500]},
+            detail={"msg": "falha ao executar ai-consult", "error": str(e)[:500]},
         )
 
-    consult = r.json()
     pdf = _build_pdf_bytes("IA-CNPJ — Relatório AI Consult", payload_in, consult)
 
     return Response(
