@@ -1,22 +1,13 @@
 from __future__ import annotations
 
 import logging
-import os
-import re
-import traceback
-from datetime import datetime, timedelta, timezone
-from time import perf_counter
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from app.api import reports as rep
 from app.core.tenant import get_current_tenant_id
 from app.deps import get_db
-from app.models.transaction import Transaction
-from app.models.category import Category
 from app.services.ai_consult_service import run_ai_consult
 from app.schemas.ai import (
     AiConsultRequest,
@@ -40,7 +31,6 @@ def _fmt_brl(cents: int) -> str:
 @router.post("/consult", response_model=AiConsultResponse)
 def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id)):
     request_id = request.headers.get('x-request-id') or uuid4().hex
-    t0 = perf_counter()
     try:
         result = run_ai_consult(
             db=db,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -35,10 +34,8 @@ def run_ai_consult(
 
         totals_prev = rep._totals_row(db, payload.company_id, prev_start_dt, prev_end_dt, tenant_id)
         prev_saidas = int(getattr(totals_prev, "saidas_cents", 0) or 0)
-        prev_entradas = int(getattr(totals_prev, "entradas_cents", 0) or 0)
     except Exception:
         prev_saidas = 0
-        prev_entradas = 0
 
     q_recent = (
         select(
@@ -142,27 +139,6 @@ def run_ai_consult(
         s_cnt = int(getattr(r, 'cnt', 0) or 0)
         if s_cnt >= 2 and s_sum >= 1000:
             recurring.append({'sample': s[:80], 'sum': s_sum, 'cnt': s_cnt})
-
-    q_single = (
-        select(desc_raw.label('description'), Transaction.amount_cents.label('amount_cents'))
-        .where(
-            Transaction.company_id == payload.company_id,
-            Transaction.tenant_id == tenant_id,
-            Transaction.occurred_at.is_not(None),
-            Transaction.occurred_at >= start_dt,
-            Transaction.occurred_at <= end_dt,
-            Transaction.kind == 'out',
-        )
-        .order_by(Transaction.amount_cents.desc())
-        .limit(1)
-    )
-
-    r_single = db.execute(q_single).first()
-    top_single_desc = None
-    top_single_amt = 0
-    if r_single:
-        top_single_desc = (getattr(r_single, 'description', '') or '(sem descrição)').strip()
-        top_single_amt = int(getattr(r_single, 'amount_cents', 0) or 0)
 
     entradas = int(getattr(totals, "entradas_cents", 0) or 0)
     saidas = int(getattr(totals, "saidas_cents", 0) or 0)
