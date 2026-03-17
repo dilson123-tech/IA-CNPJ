@@ -37,9 +37,20 @@ def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db)
         occurred_at=getattr(payload, "occurred_at", None) or datetime.now(timezone.utc).replace(tzinfo=None),
  )
     db.add(t)
+    db.flush()
+
+    out = TransactionOut(
+        id=t.id,
+        company_id=t.company_id,
+        kind=t.kind,
+        amount_cents=t.amount_cents,
+        description=t.description,
+        occurred_at=t.occurred_at,
+        category_id=t.category_id,
+    )
+
     db.commit()
-    db.refresh(t)
-    return t
+    return out
 
 @router.get("", response_model=list[TransactionOut])
 def list_transactions(company_id: int | None = None, db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id)):
