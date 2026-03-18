@@ -34,28 +34,28 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadDashboard() {
-      try {
-        setLoading(true);
-        setError(null);
+  async function loadDashboard() {
+    try {
+      setLoading(true);
+      setError(null);
 
-        const [companiesData, transactionsData] = await Promise.all([
-          getCompanies(),
-          getTransactions(),
-        ]);
+      const [companiesData, transactionsData] = await Promise.all([
+        getCompanies(),
+        getTransactions(),
+      ]);
 
-        setCompanies(companiesData);
-        setTransactions(transactionsData);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Erro ao carregar dashboard';
-        setError(message);
-      } finally {
-        setLoading(false);
-      }
+      setCompanies(companiesData);
+      setTransactions(transactionsData);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao carregar dashboard';
+      setError(message);
+    } finally {
+      setLoading(false);
     }
+  }
 
-    loadDashboard();
+  useEffect(() => {
+    void loadDashboard();
   }, []);
 
   const metrics = useMemo(() => {
@@ -102,7 +102,16 @@ export default function DashboardPage() {
 
   return (
     <AppShell title="Dashboard">
-      {error ? <StatusBanner message={error} variant="error" /> : null}
+      {error ? (
+        <StatusBanner
+          message={error}
+          variant="error"
+          actionLabel="Tentar novamente"
+          onAction={() => {
+            void loadDashboard();
+          }}
+        />
+      ) : null}
 
       <section className="dashboard-grid dashboard-grid-summary">
         <SummaryCard
