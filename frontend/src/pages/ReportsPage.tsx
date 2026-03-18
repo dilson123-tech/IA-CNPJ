@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import AppShell from '../components/layout/AppShell';
 import StatusBanner from '../components/layout/StatusBanner';
+import ContentState from '../components/layout/ContentState';
 import {
   getCompanies,
   getReportContext,
@@ -131,9 +132,9 @@ export default function ReportsPage() {
           </div>
 
           {loading ? (
-            <p>Carregando categorias...</p>
+            <ContentState message="Carregando categorias..." tone="loading" />
           ) : !summary || summary.by_category.length === 0 ? (
-            <p>Nenhuma categoria encontrada.</p>
+            <ContentState message="Nenhuma categoria encontrada." tone="empty" />
           ) : (
             <div className="kpi-list">
               {summary.by_category.map((item) => (
@@ -152,9 +153,9 @@ export default function ReportsPage() {
           </div>
 
           {loading ? (
-            <p>Carregando transações...</p>
+            <ContentState message="Carregando transações..." tone="loading" />
           ) : !context || context.recent_transactions.length === 0 ? (
-            <p>Nenhuma transação encontrada no contexto.</p>
+            <ContentState message="Nenhuma transação encontrada no contexto." tone="empty" />
           ) : (
             <div className="dashboard-list">
               {context.recent_transactions.map((item) => (

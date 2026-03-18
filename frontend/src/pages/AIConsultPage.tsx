@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import AppShell from '../components/layout/AppShell';
 import StatusBanner from '../components/layout/StatusBanner';
+import ContentState from '../components/layout/ContentState';
 import {
   getAIConsult,
   getCompanies,
@@ -302,9 +303,9 @@ export default function AIConsultPage() {
           </div>
 
           {loading ? (
-            <p>Carregando insights...</p>
+            <ContentState message="Carregando insights..." tone="loading" />
           ) : !consult || consult.insights.length === 0 ? (
-            <p>Nenhum insight retornado.</p>
+            <ContentState message="Nenhum insight retornado." tone="empty" />
           ) : (
             <div className="kpi-list">
               {consult.insights.map((item, index) => (
@@ -322,9 +323,9 @@ export default function AIConsultPage() {
           </div>
 
           {loading ? (
-            <p>Carregando riscos...</p>
+            <ContentState message="Carregando riscos..." tone="loading" />
           ) : !consult || consult.risks.length === 0 ? (
-            <p>Nenhum risco crítico retornado.</p>
+            <ContentState message="Nenhum risco crítico retornado." tone="empty" />
           ) : (
             <div className="kpi-list">
               {consult.risks.map((item, index) => (
@@ -342,9 +343,9 @@ export default function AIConsultPage() {
           </div>
 
           {loading ? (
-            <p>Carregando ações...</p>
+            <ContentState message="Carregando ações..." tone="loading" />
           ) : !consult || consult.actions.length === 0 ? (
-            <p>Nenhuma ação recomendada no momento.</p>
+            <ContentState message="Nenhuma ação recomendada no momento." tone="empty" />
           ) : (
             <div className="kpi-list">
               {consult.actions.map((item, index) => (
@@ -362,9 +363,9 @@ export default function AIConsultPage() {
           </div>
 
           {loading ? (
-            <p>Carregando categorias...</p>
+            <ContentState message="Carregando categorias..." tone="loading" />
           ) : !consult || consult.top_categories.length === 0 ? (
-            <p>Nenhuma categoria retornada.</p>
+            <ContentState message="Nenhuma categoria retornada." tone="empty" />
           ) : (
             <div className="dashboard-list">
               {consult.top_categories.map((item) => (
@@ -389,9 +390,9 @@ export default function AIConsultPage() {
           </div>
 
           {loading ? (
-            <p>Carregando transações...</p>
+            <ContentState message="Carregando transações..." tone="loading" />
           ) : !consult || consult.recent_transactions.length === 0 ? (
-            <p>Nenhuma transação recente retornada.</p>
+            <ContentState message="Nenhuma transação recente retornada." tone="empty" />
           ) : (
             <div className="dashboard-list">
               {consult.recent_transactions.map((item) => (

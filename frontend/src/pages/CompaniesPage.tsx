@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import AppShell from '../components/layout/AppShell';
 import StatusBanner from '../components/layout/StatusBanner';
+import ContentState from '../components/layout/ContentState';
 import { createCompany, getCompanies, type Company } from '../services/api';
 
 function normalizeCnpj(value: string): string {
@@ -175,9 +176,9 @@ export default function CompaniesPage() {
 
       <div className="page-card">
         {loading ? (
-          <p>Carregando empresas...</p>
+          <ContentState message="Carregando empresas..." tone="loading" />
         ) : companies.length === 0 ? (
-          <p>Nenhuma empresa encontrada. Cadastre a primeira para começar.</p>
+          <ContentState message="Nenhuma empresa encontrada. Cadastre a primeira para começar." tone="empty" />
         ) : (
           <div style={{ display: 'grid', gap: '12px' }}>
             {companies.map((company) => (
