@@ -19,11 +19,19 @@ def create_company(payload: CompanyCreate, db: Session = Depends(get_db), tenant
     exists = db.scalar(select(Company).where(Company.cnpj == payload.cnpj).where(Company.tenant_id == tenant_id))
     if exists:
         raise HTTPException(status_code=409, detail="CNPJ ja cadastrado")
+
     c = Company(cnpj=payload.cnpj, razao_social=payload.razao_social, tenant_id=tenant_id)
     db.add(c)
+    db.flush()
+
+    out = CompanyOut(
+        id=c.id,
+        cnpj=c.cnpj,
+        razao_social=c.razao_social,
+    )
+
     db.commit()
-    db.refresh(c)
-    return c
+    return out
 
 
 @router.get("", response_model=list[CompanyOut])

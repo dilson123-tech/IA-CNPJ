@@ -28,40 +28,68 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="login-page">
-      <section className="login-card">
+    <main className="auth-page">
+      <section className="auth-card">
         <div>
-          <p className="login-card__eyebrow">IA-CNPJ</p>
-          <h1 className="login-card__title">Acesso ao painel</h1>
-          <p className="login-card__text">
-            Entre para visualizar indicadores, relatórios e insights consultivos.
+          <p
+            style={{
+              margin: '0 0 8px',
+              fontSize: '0.82rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.12em',
+              color: 'var(--accent)',
+            }}
+          >
+            IA-CNPJ
+          </p>
+
+          <h1>Acesso ao painel</h1>
+
+          <p>
+            Entre para acompanhar indicadores, relatórios financeiros e diagnósticos
+            consultivos com leitura executiva do negócio.
           </p>
         </div>
 
-        <form className="login-form" onSubmit={handleSubmit}>
-          <label className="login-form__field">
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label>
             <span>Usuário</span>
             <input
               type="text"
-              placeholder="seu_usuario"
+              placeholder="usuario@empresa.com"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
+              autoComplete="username"
             />
           </label>
 
-          <label className="login-form__field">
+          <label>
             <span>Senha</span>
             <input
               type="password"
               placeholder="••••••••"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
             />
           </label>
 
-          {error ? <p className="login-form__error">{error}</p> : null}
+          {error ? (
+            <p
+              style={{
+                margin: 0,
+                color: '#ffd5db',
+                background: '#3a1620',
+                border: '1px solid rgba(248, 113, 113, 0.25)',
+                borderRadius: '14px',
+                padding: '12px 14px',
+              }}
+            >
+              {error}
+            </p>
+          ) : null}
 
-          <button className="login-form__button" type="submit" disabled={loading}>
+          <button type="submit" disabled={loading}>
             {loading ? 'Entrando...' : 'Entrar no painel'}
           </button>
         </form>

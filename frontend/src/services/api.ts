@@ -151,6 +151,20 @@ export async function getCompanies(): Promise<Company[]> {
   });
 }
 
+export type CreateCompanyPayload = {
+  cnpj: string;
+  razao_social: string;
+};
+
+export async function createCompany(payload: CreateCompanyPayload): Promise<Company> {
+  return request<Company>('/api/v1/companies', {
+    method: 'POST',
+    auth: true,
+    body: JSON.stringify(payload),
+  });
+}
+
+
 export async function getTransactions(): Promise<Transaction[]> {
   return request<Transaction[]>('/api/v1/transactions', {
     method: 'GET',
