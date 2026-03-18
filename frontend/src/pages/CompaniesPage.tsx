@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import AppShell from '../components/layout/AppShell';
+import StatusBanner from '../components/layout/StatusBanner';
 import { createCompany, getCompanies, type Company } from '../services/api';
 
 function normalizeCnpj(value: string): string {
@@ -83,34 +84,9 @@ export default function CompaniesPage() {
 
   return (
     <AppShell title="Empresas">
-      {error ? (
-        <div
-          style={{
-            marginBottom: '16px',
-            padding: '12px 16px',
-            borderRadius: '12px',
-            background: '#3a1620',
-            color: '#ffd5db',
-          }}
-        >
-          {error}
-        </div>
-      ) : null}
+      {error ? <StatusBanner message={error} variant="error" /> : null}
 
-      {success ? (
-        <div
-          style={{
-            marginBottom: '16px',
-            padding: '12px 16px',
-            borderRadius: '12px',
-            background: 'rgba(52, 211, 153, 0.12)',
-            color: '#d1fae5',
-            border: '1px solid rgba(52, 211, 153, 0.2)',
-          }}
-        >
-          {success}
-        </div>
-      ) : null}
+      {success ? <StatusBanner message={success} variant="success" /> : null}
 
       <section className="page-card toolbar-card" style={{ marginBottom: '16px' }}>
         <div className="toolbar-card__top">
