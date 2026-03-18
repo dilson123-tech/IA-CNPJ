@@ -79,44 +79,44 @@ export default function AIConsultPage() {
     }
   }
 
-  useEffect(() => {
-    async function bootstrap() {
-      try {
-        setLoading(true);
-        setError(null);
+  async function bootstrap() {
+    try {
+      setLoading(true);
+      setError(null);
 
-        const companiesData = await getCompanies();
-        setCompanies(companiesData);
+      const companiesData = await getCompanies();
+      setCompanies(companiesData);
 
-        const firstCompany = companiesData[0] || null;
+      const firstCompany = companiesData[0] || null;
 
-        if (!firstCompany) {
-          setSelectedCompanyId('');
-          setConsult(null);
-          return;
-        }
-
-        setSelectedCompanyId(String(firstCompany.id));
-
-        const consultData = await getAIConsult({
-          company_id: firstCompany.id,
-          start: DEFAULT_PERIOD.start,
-          end: DEFAULT_PERIOD.end,
-          limit: 10,
-        });
-
-        setConsult(consultData);
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Erro ao carregar análise consultiva';
-        setError(message);
+      if (!firstCompany) {
+        setSelectedCompanyId('');
         setConsult(null);
-      } finally {
-        setLoading(false);
+        return;
       }
-    }
 
-    bootstrap();
+      setSelectedCompanyId(String(firstCompany.id));
+
+      const consultData = await getAIConsult({
+        company_id: firstCompany.id,
+        start: DEFAULT_PERIOD.start,
+        end: DEFAULT_PERIOD.end,
+        limit: 10,
+      });
+
+      setConsult(consultData);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Erro ao carregar análise consultiva';
+      setError(message);
+      setConsult(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void bootstrap();
   }, []);
 
   async function handleRefresh() {
@@ -143,7 +143,25 @@ export default function AIConsultPage() {
 
   return (
     <AppShell title="IA Consultiva">
-      {error ? <StatusBanner message={error} variant="error" /> : null}
+      {error ? (
+        <StatusBanner
+          message={error}
+          variant="error"
+          actionLabel="Tentar novamente"
+          onAction={() => {
+            if (selectedCompanyId) {
+              void loadConsult({
+                companyId: Number(selectedCompanyId),
+                start: startDate,
+                end: endDate,
+              });
+              return;
+            }
+
+            void bootstrap();
+          }}
+        />
+      ) : null}
 
       <section className="page-card toolbar-card" style={{ marginBottom: '16px' }}>
         <div className="toolbar-card__top">

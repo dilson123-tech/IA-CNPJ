@@ -38,44 +38,53 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadReports() {
-      try {
-        setLoading(true);
-        setError(null);
+  async function loadReports() {
+    try {
+      setLoading(true);
+      setError(null);
 
-        const companies = await getCompanies();
-        const firstCompany = companies[0] || null;
+      const companies = await getCompanies();
+      const firstCompany = companies[0] || null;
 
-        setCompany(firstCompany);
+      setCompany(firstCompany);
 
-        if (!firstCompany) {
-          setSummary(null);
-          setContext(null);
-          return;
-        }
-
-        const [summaryData, contextData] = await Promise.all([
-          getReportSummary({ company_id: firstCompany.id }),
-          getReportContext({ company_id: firstCompany.id, limit: 10 }),
-        ]);
-
-        setSummary(summaryData);
-        setContext(contextData);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Erro ao carregar relatórios';
-        setError(message);
-      } finally {
-        setLoading(false);
+      if (!firstCompany) {
+        setSummary(null);
+        setContext(null);
+        return;
       }
-    }
 
-    loadReports();
+      const [summaryData, contextData] = await Promise.all([
+        getReportSummary({ company_id: firstCompany.id }),
+        getReportContext({ company_id: firstCompany.id, limit: 10 }),
+      ]);
+
+      setSummary(summaryData);
+      setContext(contextData);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao carregar relatórios';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadReports();
   }, []);
 
   return (
     <AppShell title="Relatórios">
-      {error ? <StatusBanner message={error} variant="error" /> : null}
+      {error ? (
+        <StatusBanner
+          message={error}
+          variant="error"
+          actionLabel="Tentar novamente"
+          onAction={() => {
+            void loadReports();
+          }}
+        />
+      ) : null}
 
       <section className="page-card" style={{ marginBottom: '16px' }}>
         <h2 style={{ marginTop: 0, marginBottom: '8px' }}>Resumo executivo</h2>

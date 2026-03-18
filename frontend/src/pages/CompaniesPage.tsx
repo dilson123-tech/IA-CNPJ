@@ -25,18 +25,19 @@ export default function CompaniesPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [cnpj, setCnpj] = useState('');
   const [razaoSocial, setRazaoSocial] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   async function loadCompanies() {
     try {
       setLoading(true);
-      setError(null);
+      setPageError(null);
       const data = await getCompanies();
       setCompanies(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao carregar empresas';
-      setError(message);
+      setPageError(message);
     } finally {
       setLoading(false);
     }
@@ -48,7 +49,7 @@ export default function CompaniesPage() {
 
   async function handleCreateCompany(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
+    setFormError(null);
     setSuccess(null);
 
     const payload = {
@@ -57,12 +58,12 @@ export default function CompaniesPage() {
     };
 
     if (payload.cnpj.length !== 14) {
-      setError('Informe um CNPJ com 14 dígitos.');
+      setFormError('Informe um CNPJ com 14 dígitos.');
       return;
     }
 
     if (!payload.razao_social) {
-      setError('Informe a razão social da empresa.');
+      setFormError('Informe a razão social da empresa.');
       return;
     }
 
@@ -77,7 +78,7 @@ export default function CompaniesPage() {
       setSuccess(`Empresa ${created.razao_social} cadastrada com sucesso.`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao cadastrar empresa';
-      setError(message);
+      setFormError(message);
     } finally {
       setSubmitting(false);
     }
@@ -85,7 +86,18 @@ export default function CompaniesPage() {
 
   return (
     <AppShell title="Empresas">
-      {error ? <StatusBanner message={error} variant="error" /> : null}
+      {pageError ? (
+        <StatusBanner
+          message={pageError}
+          variant="error"
+          actionLabel="Tentar novamente"
+          onAction={() => {
+            void loadCompanies();
+          }}
+        />
+      ) : null}
+
+      {formError ? <StatusBanner message={formError} variant="error" /> : null}
 
       {success ? <StatusBanner message={success} variant="success" /> : null}
 
@@ -109,7 +121,8 @@ export default function CompaniesPage() {
               type="button"
               onClick={() => {
                 setShowCreateForm((current) => !current);
-                setError(null);
+                setPageError(null);
+                setFormError(null);
                 setSuccess(null);
               }}
             >
@@ -154,7 +167,7 @@ export default function CompaniesPage() {
                   setShowCreateForm(false);
                   setCnpj('');
                   setRazaoSocial('');
-                  setError(null);
+                  setFormError(null);
                 }}
                 style={{
                   minHeight: '46px',
