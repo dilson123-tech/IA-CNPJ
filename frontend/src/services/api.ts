@@ -14,9 +14,18 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   if (auth) {
     const token = getToken();
-    if (token) {
-      finalHeaders.set('Authorization', `Bearer ${token}`);
+
+    if (!token) {
+      clearToken();
+
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+
+      throw new Error('Sessão expirada. Faça login novamente.');
     }
+
+    finalHeaders.set('Authorization', `Bearer ${token}`);
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
