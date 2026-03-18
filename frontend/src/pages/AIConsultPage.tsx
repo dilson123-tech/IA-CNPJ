@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import AppShell from '../components/layout/AppShell';
+import StatusBanner from '../components/layout/StatusBanner';
 import {
   getAIConsult,
   getCompanies,
@@ -141,19 +142,7 @@ export default function AIConsultPage() {
 
   return (
     <AppShell title="IA Consultiva">
-      {error ? (
-        <div
-          style={{
-            marginBottom: '16px',
-            padding: '12px 16px',
-            borderRadius: '12px',
-            background: '#3a1620',
-            color: '#ffd5db',
-          }}
-        >
-          {error}
-        </div>
-      ) : null}
+      {error ? <StatusBanner message={error} variant="error" /> : null}
 
       <section className="page-card toolbar-card" style={{ marginBottom: '16px' }}>
         <div className="toolbar-card__top">
