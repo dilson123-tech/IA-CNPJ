@@ -1,15 +1,31 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { login } from '../services/api'
-import { setToken } from '../services/auth'
+import { isAuthenticated, setToken } from '../services/auth'
+
+type LoginLocationState = {
+  from?: {
+    pathname?: string
+  }
+}
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const locationState = (location.state as LoginLocationState | null) ?? null
+  const redirectTo = locationState?.from?.pathname || '/dashboard'
+
+  useEffect(() => {
+    if (isAuthenticated()) {
+      navigate(redirectTo, { replace: true })
+    }
+  }, [navigate, redirectTo])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -19,7 +35,7 @@ export default function LoginPage() {
     try {
       const result = await login({ username, password })
       setToken(result.access_token)
-      navigate('/dashboard')
+      navigate(redirectTo, { replace: true })
     } catch {
       setError('Login inválido. Confira usuário e senha.')
     } finally {
