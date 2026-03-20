@@ -92,6 +92,32 @@ export type Company = {
   razao_social: string;
 };
 
+const OFFICIAL_HIDDEN_COMPANY_CNPJS = new Set([
+  '11111111000100',
+  '12345678000100',
+  '12345678901234',
+  '12345678901235',
+  '12345678901236',
+  '12345678901237',
+]);
+
+const OFFICIAL_HIDDEN_COMPANY_NAME_PATTERNS = [
+  /^Empresa Tenant A$/i,
+  /^Empresa Teste\b/i,
+  /^MEI Teste\b/i,
+];
+
+function isOfficialVisibleCompany(company: Company): boolean {
+  const cnpj = String(company.cnpj ?? '').replace(/\D/g, '');
+  const razaoSocial = String(company.razao_social ?? '').trim();
+
+  if (OFFICIAL_HIDDEN_COMPANY_CNPJS.has(cnpj)) {
+    return false;
+  }
+
+  return !OFFICIAL_HIDDEN_COMPANY_NAME_PATTERNS.some((pattern) => pattern.test(razaoSocial));
+}
+
 export type Transaction = {
   id: number;
   company_id: number;
@@ -154,10 +180,12 @@ export async function login(payload: LoginPayload): Promise<LoginResponse> {
 }
 
 export async function getCompanies(): Promise<Company[]> {
-  return request<Company[]>('/api/v1/companies', {
+  const companies = await request<Company[]>('/api/v1/companies', {
     method: 'GET',
     auth: true,
   });
+
+  return companies.filter(isOfficialVisibleCompany);
 }
 
 export type CreateCompanyPayload = {
