@@ -58,23 +58,34 @@ export default function DashboardPage() {
     void loadDashboard();
   }, []);
 
+  const visibleCompanyIds = useMemo(
+    () => new Set(companies.map((company) => company.id)),
+    [companies]
+  );
+
+  const visibleTransactions = useMemo(
+    () =>
+      transactions.filter((transaction) => visibleCompanyIds.has(transaction.company_id)),
+    [transactions, visibleCompanyIds]
+  );
+
   const metrics = useMemo(() => {
-    const totalIn = transactions
+    const totalIn = visibleTransactions
       .filter((transaction) => transaction.kind === 'in')
       .reduce((sum, transaction) => sum + transaction.amount_cents, 0);
 
-    const totalOut = transactions
+    const totalOut = visibleTransactions
       .filter((transaction) => transaction.kind === 'out')
       .reduce((sum, transaction) => sum + transaction.amount_cents, 0);
 
-    const totalProcessed = transactions.reduce(
+    const totalProcessed = visibleTransactions.reduce(
       (sum, transaction) => sum + transaction.amount_cents,
       0
     );
 
     const monthlyResult = totalIn - totalOut;
 
-    const recentItems = [...transactions]
+    const recentItems = [...visibleTransactions]
       .sort(
         (a, b) =>
           new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime()
@@ -98,7 +109,7 @@ export default function DashboardPage() {
       monthlyResult,
       recentItems,
     };
-  }, [transactions]);
+  }, [visibleTransactions]);
 
   return (
     <AppShell title="Dashboard">
@@ -121,7 +132,7 @@ export default function DashboardPage() {
         />
         <SummaryCard
           title="Transações processadas"
-          value={loading ? '...' : String(transactions.length)}
+          value={loading ? '...' : String(visibleTransactions.length)}
           subtitle="Quantidade total registrada"
         />
         <SummaryCard
@@ -196,13 +207,13 @@ export default function DashboardPage() {
           text={
             loading
               ? 'Carregando leitura operacional do ambiente...'
-              : transactions.length > 0
-              ? `O tenant já possui ${transactions.length} transação(ões) registrada(s), com volume total de ${formatCurrencyFromCents(
+              : visibleTransactions.length > 0
+              ? `A vitrine oficial já possui ${visibleTransactions.length} transação(ões) visíveis, com volume total de ${formatCurrencyFromCents(
                   metrics.totalProcessed
                 )} e resultado atual de ${formatCurrencyFromCents(
                   metrics.monthlyResult
                 )}. Próximo passo estratégico: ligar relatórios e IA consultiva para transformar essa leitura em recomendação executiva.`
-              : 'Nenhuma transação encontrada. O próximo passo é validar o fluxo de cadastro financeiro para alimentar o painel executivo.'
+              : 'Nenhuma transação visível no painel oficial. O próximo passo é cadastrar dados reais para alimentar a vitrine executiva.'
           }
         />
       </section>

@@ -88,25 +88,8 @@ export default function AIConsultPage() {
 
       const companiesData = await getCompanies();
       setCompanies(companiesData);
-
-      const firstCompany = companiesData[0] || null;
-
-      if (!firstCompany) {
-        setSelectedCompanyId('');
-        setConsult(null);
-        return;
-      }
-
-      setSelectedCompanyId(String(firstCompany.id));
-
-      const consultData = await getAIConsult({
-        company_id: firstCompany.id,
-        start: DEFAULT_PERIOD.start,
-        end: DEFAULT_PERIOD.end,
-        limit: 10,
-      });
-
-      setConsult(consultData);
+      setSelectedCompanyId('');
+      setConsult(null);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Erro ao carregar análise consultiva';

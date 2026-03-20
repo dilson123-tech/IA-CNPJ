@@ -70,8 +70,9 @@ export default function CompaniesPage() {
     try {
       setSubmitting(true);
       const created = await createCompany(payload);
+      const refreshed = await getCompanies();
 
-      setCompanies((current) => [...current, created].sort((a, b) => a.id - b.id));
+      setCompanies(refreshed);
       setCnpj('');
       setRazaoSocial('');
       setShowCreateForm(false);
