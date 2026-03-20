@@ -5,6 +5,7 @@ import ContentState from '../components/layout/ContentState';
 import {
   getAIConsult,
   getCompanies,
+  openAIConsultPdf,
   type AIConsultResponse,
   type Company,
 } from '../services/api';
@@ -45,6 +46,7 @@ export default function AIConsultPage() {
   const [endDate, setEndDate] = useState(DEFAULT_PERIOD.end);
   const [consult, setConsult] = useState<AIConsultResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedCompany = useMemo(
@@ -130,6 +132,31 @@ export default function AIConsultPage() {
       start: startDate,
       end: endDate,
     });
+  }
+
+  async function handleOpenPdf() {
+    if (!selectedCompanyId) {
+      setError('Selecione uma empresa para gerar o PDF executivo.');
+      return;
+    }
+
+    try {
+      setPdfLoading(true);
+      setError(null);
+
+      await openAIConsultPdf({
+        company_id: Number(selectedCompanyId),
+        start: startDate,
+        end: endDate,
+        limit: 10,
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Erro ao gerar PDF executivo';
+      setError(message);
+    } finally {
+      setPdfLoading(false);
+    }
   }
 
   function handleClearFilters() {
@@ -222,7 +249,7 @@ export default function AIConsultPage() {
               className="control-button"
               type="button"
               onClick={handleRefresh}
-              disabled={loading || !selectedCompanyId}
+              disabled={loading || pdfLoading || !selectedCompanyId}
             >
               {loading ? 'Atualizando...' : 'Atualizar análise'}
             </button>
@@ -230,8 +257,25 @@ export default function AIConsultPage() {
             <button
               className="control-button"
               type="button"
+              onClick={() => {
+                void handleOpenPdf();
+              }}
+              disabled={loading || pdfLoading || !selectedCompanyId}
+              style={{
+                background: 'transparent',
+                color: '#e7ecf3',
+                border: '1px solid rgba(80, 167, 255, 0.45)',
+                boxShadow: 'none',
+              }}
+            >
+              {pdfLoading ? 'Gerando PDF...' : 'Gerar PDF executivo'}
+            </button>
+
+            <button
+              className="control-button"
+              type="button"
               onClick={handleClearFilters}
-              disabled={loading}
+              disabled={loading || pdfLoading}
               style={{
                 background: 'transparent',
                 color: '#e7ecf3',

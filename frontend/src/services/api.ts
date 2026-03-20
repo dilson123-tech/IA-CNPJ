@@ -273,3 +273,81 @@ export async function getAIConsult(params: {
   });
 }
 
+export async function openAIConsultPdf(params: {
+  company_id: number;
+  start?: string;
+  end?: string;
+  limit?: number;
+  question?: string;
+}): Promise<void> {
+  const token = getToken();
+
+  if (!token) {
+    clearToken();
+
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
+
+    throw new Error('Sessão expirada. Faça login novamente.');
+  }
+
+  const payload = {
+    company_id: params.company_id,
+    period: {
+      start: params.start,
+      end: params.end,
+    },
+    limit: params.limit ?? 20,
+    ...(params.question ? { question: params.question } : {}),
+  };
+
+  const response = await fetch(`${API_BASE_URL}/api/v1/reports/ai-consult/pdf`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let message = 'Erro ao gerar PDF executivo';
+
+    try {
+      const errorData = await response.json();
+      message = errorData.detail || errorData.message || message;
+    } catch {
+      // segue com mensagem padrão
+    }
+
+    if (response.status === 401) {
+      clearToken();
+
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+
+      throw new Error('Sessão expirada. Faça login novamente.');
+    }
+
+    throw new Error(typeof message === 'string' ? message : 'Erro ao gerar PDF executivo');
+  }
+
+  const blob = await response.blob();
+  const fileUrl = window.URL.createObjectURL(blob);
+  const opened = window.open(fileUrl, '_blank', 'noopener,noreferrer');
+
+  if (!opened) {
+    const link = document.createElement('a');
+    link.href = fileUrl;
+    link.download = 'ia-cnpj-relatorio-ai-consult.pdf';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(fileUrl);
+  }, 60000);
+}
