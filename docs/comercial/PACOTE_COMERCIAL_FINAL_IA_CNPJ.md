@@ -53,7 +53,8 @@ O pacote comercial final do IA-CNPJ será composto por:
 4. plano oficial de prints
 5. seleção final dos prints
 6. prints premium recapturados
-7. PDF/apresentação comercial final montado
+7. deck comercial final (arquivo-mestre)
+8. PDF/apresentação comercial final renderizado(a)
 
 ---
 
@@ -68,6 +69,7 @@ Os documentos oficiais já existentes e válidos para esse pacote são:
 - `docs/comercial/INDEX_COMERCIAL_IA_CNPJ.md`
 - `docs/comercial/PLANO_PRINTS_IA_CNPJ.md`
 - `docs/comercial/SELECAO_FINAL_PRINTS_IA_CNPJ.md`
+- `docs/comercial/DECK_COMERCIAL_FINAL_IA_CNPJ.md`
 
 Esses documentos não devem ser reabertos sem motivo real.
 
@@ -77,25 +79,18 @@ Esses documentos não devem ser reabertos sem motivo real.
 
 Faltam apenas os itens abaixo:
 
-### 5.1 Recaptura premium dos prints
-Recapturar os 7 prints aprovados com padrão comercial premium:
+### 5.1 Renderização do material final
+Transformar o deck comercial final em PDF/apresentação final real, pronto para envio.
 
-- sem abas visíveis
-- sem barra de favoritos
-- sem ruído visual de navegador
-- sem erros em tela
-- com enquadramento limpo
-- com aparência de produto premium
+### 5.2 Revisão de abordagem final
+Definir se haverá:
 
-### 5.2 Seleção final dos arquivos visuais
-Separar a melhor versão final de cada print aprovado.
+- versão curta
+- versão estendida
+- mensagem final de abordagem comercial
 
-### 5.3 Montagem do material final
-Montar o PDF/apresentação comercial final com base:
-
-- na estrutura oficial já definida
-- na copy comercial já aprovada
-- na narrativa visual já validada
+### 5.3 Conexão com divulgação/deploy
+Depois do material final renderizado, alinhar o pacote com site, vídeo-demo e abordagem de mercado.
 
 ---
 
@@ -103,17 +98,12 @@ Montar o PDF/apresentação comercial final com base:
 
 A sequência correta é:
 
-1. recapturar login
-2. recapturar dashboard
-3. recapturar empresas
-4. recapturar criação de empresa
-5. recapturar relatórios
-6. recapturar IA consultiva
-7. recapturar PDF executivo
-8. selecionar as melhores versões
-9. encaixar os prints na estrutura do PDF/apresentação
-10. revisar narrativa final
-11. fechar material final para abordagem comercial
+1. usar o deck comercial final como arquivo-mestre
+2. encaixar os prints premium na versão final
+3. renderizar o PDF/apresentação comercial
+4. revisar narrativa final
+5. fechar material final para abordagem comercial
+6. alinhar com site/vídeo/deploy comercial
 
 ---
 
