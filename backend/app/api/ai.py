@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.tenant import get_current_tenant_id
 from app.deps import get_db
 from app.services.ai_consult_service import run_ai_consult
+from app.api.transaction import suggest_categories as tx_suggest_categories, apply_suggestions as tx_apply_suggestions
 from app.schemas.ai import (
     AiConsultRequest,
     AiConsultResponse,
@@ -46,11 +47,41 @@ def consult(payload: AiConsultRequest, request: Request, db: Session = Depends(g
 
 
 @router.post("/suggest-categories", response_model=AISuggestCategoriesResponse)
-def ai_suggest_categories(payload: AISuggestCategoriesRequest, db: Session = Depends(get_db)):
-    raise HTTPException(status_code=501, detail="suggest-categories temporarily disabled (lint fix)")
+def ai_suggest_categories(
+    payload: AISuggestCategoriesRequest,
+    db: Session = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant_id),
+):
+    items = tx_suggest_categories(
+        company_id=payload.company_id,
+        start=payload.start,
+        end=payload.end,
+        limit=payload.limit,
+        include_no_match=payload.include_no_match,
+        db=db,
+        tenant_id=tenant_id,
+    )
+    return {
+        "company_id": payload.company_id,
+        "period": {"start": payload.start, "end": payload.end},
+        "items": items,
+    }
 
 
 @router.post("/apply-suggestions", response_model=AIApplySuggestionsResponse)
-def ai_apply_suggestions(payload: AIApplySuggestionsRequest, db: Session = Depends(get_db)):
-    raise HTTPException(status_code=501, detail="apply-suggestions temporarily disabled (lint fix)")
+def ai_apply_suggestions(
+    payload: AIApplySuggestionsRequest,
+    db: Session = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant_id),
+):
+    return tx_apply_suggestions(
+        company_id=payload.company_id,
+        start=payload.start,
+        end=payload.end,
+        limit=payload.limit,
+        dry_run=payload.dry_run,
+        include_no_match=payload.include_no_match,
+        db=db,
+        tenant_id=tenant_id,
+    )
 

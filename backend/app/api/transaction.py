@@ -252,6 +252,7 @@ def apply_suggestions(
     end: str | None = None,
     limit: int = Query(200, ge=1, le=500),
     dry_run: bool = Query(False),
+    include_no_match: bool = Query(False),
     db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id),
 ):
     """
@@ -269,7 +270,9 @@ def apply_suggestions(
         start=start,
         end=end,
         limit=limit,
+        include_no_match=include_no_match,
         db=db,
+        tenant_id=tenant_id,
     )
 
     suggested_count = sum(1 for s in suggestions if s.get('suggested_category_id'))
@@ -302,7 +305,7 @@ def apply_suggestions(
             "invalid_category_ids": [],
         }
 
-    req = BulkCategorizeRequest, BulkCategorizeResponse(company_id=company_id, items=items)
+    req = BulkCategorizeRequest(company_id=company_id, items=items)
     res = bulk_categorize(req, db=db)
 
     # compat pydantic v1/v2
