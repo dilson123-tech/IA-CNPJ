@@ -117,6 +117,32 @@ fornecer mensagens curtas e estratégicas para materiais comerciais.
 - em abordagem comercial
 - em apresentações
 
+
+### 5. Deck comercial final
+**Arquivo:** `docs/comercial/DECK_COMERCIAL_FINAL_IA_CNPJ.md`
+
+**Função:**
+servir como arquivo-mestre da narrativa final do material comercial.
+
+**Contém:**
+- capa
+- problema do mercado
+- apresentação do produto
+- visão geral da solução
+- acesso ao painel
+- gestão de empresas
+- relatórios
+- IA consultiva
+- PDF executivo
+- diferenciais
+- chamada para próximo passo
+
+**Quando usar:**
+- na montagem do PDF comercial final
+- na montagem de apresentação institucional
+- como base para adaptação em site comercial
+- como base para vídeo-demo e abordagem
+
 ---
 
 ## 3. Ordem ideal de leitura
@@ -127,12 +153,14 @@ Para absorver o bloco comercial do jeito certo, a ordem recomendada é:
 2. `COPY_COMERCIAL_IA_CNPJ.md`
 3. `ROTEIRO_DEMO_IA_CNPJ.md`
 4. `ESTRUTURA_PDF_COMERCIAL_IA_CNPJ.md`
+5. `DECK_COMERCIAL_FINAL_IA_CNPJ.md`
 
 ### Motivo da ordem
 - primeiro vem a visão macro
 - depois a linguagem comercial curta
 - depois o discurso falado da demo
 - por fim a estrutura do material final em PDF/apresentação
+- e depois o arquivo-mestre do deck final já consolidado
 
 ---
 
@@ -156,9 +184,13 @@ Na prática, a ordem recomendada de uso é:
 - roteiro de demo
 - estrutura textual do PDF comercial
 - copy comercial curta
+- plano oficial de prints
+- seleção final dos prints
+- pacote comercial final
+- deck comercial final (arquivo-mestre)
 - versionamento em PR separada por peça
-- merge em `main` de todas as peças
-- checks verdes em todas as PRs
+- merge em `main` das peças já oficializadas
+- checks verdes nas PRs já concluídas
 
 ### Leitura honesta
 O IA-CNPJ já tem **base comercial documentada e versionada**.  
@@ -170,9 +202,7 @@ Agora já existe base real para apresentação.
 ## 6. O que ainda falta fechar
 
 ### Pendências naturais do bloco comercial
-- definir lista final de prints reais a capturar
-- organizar ordem oficial de captura das telas
-- montar versão final do PDF/apresentação
+- transformar o deck comercial final em PDF/apresentação final renderizado
 - decidir se haverá versão curta e versão estendida do material
 - preparar eventual mensagem de abordagem comercial final
 - depois disso, conectar com o bloco de deploy final
@@ -184,13 +214,13 @@ Agora já existe base real para apresentação.
 O próximo passo natural do bloco comercial é:
 
 ### ETAPA 1
-definir **plano oficial de prints**
+usar o **deck comercial final** como arquivo-mestre
 
 ### ETAPA 2
-definir **ordem de captura das telas**
+transformar o deck em **PDF/apresentação renderizado(a)**
 
 ### ETAPA 3
-preparar a **montagem final do PDF/apresentação**
+preparar eventual versão curta / abordagem final
 
 ### ETAPA 4
 só depois pensar em ligação com deploy final
@@ -224,4 +254,4 @@ O **IA-CNPJ** já possui um bloco comercial consistente, composto por:
 
 Este índice existe para organizar o uso desses materiais e acelerar o fechamento do pacote comercial final.
 
-**Próximo alvo imediato:** consolidar prints e montagem final do material comercial, sem reabrir o core.
+**Próximo alvo imediato:** renderizar o deck comercial final em PDF/apresentação e conectar isso à abordagem comercial, sem reabrir o core.
