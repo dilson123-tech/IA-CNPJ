@@ -2,6 +2,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, AliasChoices, model_validator
 
 class Settings(BaseSettings):
+    @staticmethod
+    def _normalize_database_url(value: str) -> str:
+        raw = str(value or '').strip()
+        if not raw:
+            return raw
+
+        if raw.startswith('postgresql+psycopg://'):
+            return raw
+
+        if raw.startswith('postgres://'):
+            return 'postgresql+psycopg://' + raw[len('postgres://'):]
+
+        if raw.startswith('postgresql://'):
+            return 'postgresql+psycopg://' + raw[len('postgresql://'):]
+
+        return raw
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
@@ -30,6 +47,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _security_invariants(self):
+        self.DATABASE_URL = self._normalize_database_url(self.DATABASE_URL)
         # Fail-fast de segurança (contrato de settings)
         if self.AUTH_PROTECT_DOCS and not self.AUTH_ENABLED:
             raise ValueError("SECURITY: AUTH_PROTECT_DOCS exige AUTH_ENABLED=true")
