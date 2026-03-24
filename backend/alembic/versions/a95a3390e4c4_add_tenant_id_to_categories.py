@@ -21,7 +21,19 @@ def _is_sqlite() -> bool:
     return op.get_bind().dialect.name == "sqlite"
 
 
+def _ensure_default_tenant() -> None:
+    op.execute(
+        """
+        INSERT INTO tenants (id, name, plan, status, created_at)
+        SELECT 1, 'Default Tenant', 'trial', 'active', CURRENT_TIMESTAMP
+        WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE id = 1)
+        """
+    )
+
+
 def upgrade() -> None:
+    _ensure_default_tenant()
+
     op.add_column("categories", sa.Column("tenant_id", sa.Integer(), nullable=True))
     op.execute("UPDATE categories SET tenant_id = 1 WHERE tenant_id IS NULL")
 
