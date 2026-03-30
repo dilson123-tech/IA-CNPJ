@@ -14,6 +14,7 @@ from app.core.security import (
 from app.core.settings import settings
 from app.deps import get_db
 from app.models.tenant import TenantMember
+from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -61,6 +62,21 @@ def verify_password(password: str) -> bool:
     if not stored:
         return False
     return verify_password_core(password, stored)
+
+
+def _authenticate_user(db: Session, username: str, password: str) -> tuple[User | None, TenantMember | None]:
+    user = db.query(User).filter(User.email == username).first()
+    if not user or not user.is_active:
+        return None, None
+
+    member = db.query(TenantMember).filter(TenantMember.email == username).first()
+    if not member:
+        return user, None
+
+    if not verify_password_core(password, user.password_hash):
+        return user, None
+
+    return user, member
 
 
 def _lab_seed_if_needed(db: Session) -> None:
@@ -171,16 +187,27 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
     username = (payload.username or "").strip()
     configured = _configured_username()
 
-    # 1) tenta login normal por email (multi-tenant)
-    member = db.query(TenantMember).filter(TenantMember.email == username).first()
+    # 1) tenta auth comercial por usuário real
+    user, member = _authenticate_user(db, username, payload.password)
 
-    # 2) fallback "dev" (CI/LAB): se username == configured, pega o primeiro member existente
+    # 2) fallback demo/global atual
+    if member is None:
+        member = db.query(TenantMember).filter(TenantMember.email == username).first()
+
+    # 3) fallback "dev" (CI/LAB): se username == configured, pega o primeiro member existente
     if member is None and configured and username == configured:
         member = db.query(TenantMember).order_by(TenantMember.id).first()
 
     env = (os.getenv("IA_CNPJ_ENV") or "").strip().lower()
     lab_ok = env == "lab" and member is not None and payload.password == "dev"
-    password_ok = verify_password(payload.password) or lab_ok
+    if user and member:
+        password_ok = verify_password_core(payload.password, user.password_hash)
+    elif verify_password(payload.password):
+        password_ok = True
+    elif lab_ok:
+        password_ok = True
+    else:
+        password_ok = False
 
     if not member or not password_ok:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
