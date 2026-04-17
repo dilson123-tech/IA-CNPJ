@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.db import SessionLocal
+from app.utils.db_sequence_fix import fix_sequences
 from app.core.security import hash_password
 from app.models.tenant import Tenant, TenantMember
 from app.models.user import User
@@ -29,6 +30,7 @@ def parse_args():
 def main():
     args = parse_args()
     db = SessionLocal()
+    fix_sequences(db, db.bind.url.render_as_string(hide_password=False))
     db.execute(text("SET app.tenant_id = '1'"))
     db.commit()
 

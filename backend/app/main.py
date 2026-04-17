@@ -13,6 +13,7 @@ from app.api.category import router as category_router
 from app.api.transaction import router as transaction_router
 from app.api.reports import router as reports_router
 from app.api.ai import router as ai_router
+from app.api.admin_onboarding import router as admin_onboarding_router
 
 
 # 🚫 Failsafe: em PROD, auth não pode estar desligado
@@ -69,6 +70,8 @@ app.include_router(reports_router, dependencies=PROTECTED_DEPS)
 app.include_router(reports_router, prefix="/api/v1", dependencies=PROTECTED_DEPS)
 app.include_router(ai_router, dependencies=PROTECTED_DEPS)
 app.include_router(ai_router, prefix="/api/v1", dependencies=PROTECTED_DEPS)
+app.include_router(admin_onboarding_router, dependencies=PROTECTED_DEPS)
+app.include_router(admin_onboarding_router, prefix="/api/v1", dependencies=PROTECTED_DEPS)
 
 
 @app.get("/health")

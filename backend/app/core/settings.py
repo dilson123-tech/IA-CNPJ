@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     AUTH_JWT_SECRET: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_AUTH_JWT_SECRET","AUTH_JWT_SECRET","AUTH_SECRET","JWT_SECRET"))
     AUTH_JWT_EXPIRE_MINUTES: int = Field(default=60, validation_alias=AliasChoices("IA_CNPJ_AUTH_JWT_EXPIRE_MINUTES","AUTH_JWT_EXPIRE_MINUTES","AUTH_TOKEN_EXPIRE_MINUTES"))
     BUILD_SHA: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_BUILD_SHA","BUILD_SHA","GITHUB_SHA"))
+    ONBOARDING_ADMIN_EMAILS: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_ONBOARDING_ADMIN_EMAILS","ONBOARDING_ADMIN_EMAILS"))
 
     @model_validator(mode="after")
     def _security_invariants(self):
