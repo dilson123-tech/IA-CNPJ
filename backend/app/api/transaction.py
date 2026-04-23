@@ -22,10 +22,15 @@ def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db)
     if not company:
         raise HTTPException(status_code=404, detail="Empresa (company_id) nao existe")
 
-    # valida categoria
-    cat = db.scalar(select(Category).where(Category.id == payload.category_id).where(Category.tenant_id == tenant_id))
-    if not cat:
-        raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
+    # valida categoria apenas se vier informada
+    if payload.category_id is not None:
+        cat = db.scalar(
+            select(Category)
+            .where(Category.id == payload.category_id)
+            .where(Category.tenant_id == tenant_id)
+        )
+        if not cat:
+            raise HTTPException(status_code=404, detail="Categoria (category_id) nao existe")
 
     t = Transaction(
         tenant_id=tenant_id,

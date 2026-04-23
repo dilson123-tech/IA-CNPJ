@@ -9,7 +9,7 @@ class TransactionCreate(BaseModel):
     amount_cents: int
     description: str | None = ""
     occurred_at: datetime | None = None
-    category_id: int
+    category_id: int | None = None
 
 
 class TransactionOut(BaseModel):
@@ -19,7 +19,7 @@ class TransactionOut(BaseModel):
     amount_cents: int
     description: str
     occurred_at: datetime | None
-    category_id: int
+    category_id: int | None
 
     model_config = ConfigDict(from_attributes=True)
 
