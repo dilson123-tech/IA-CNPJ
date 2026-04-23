@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_TIMEOUT_S: int = 25
 
+    CNPJ_LOOKUP_PROVIDER: str = "brasilapi"
+    CNPJ_LOOKUP_BASE_URL: str = "https://brasilapi.com.br/api/cnpj/v1"
+    CNPJ_LOOKUP_TIMEOUT_S: int = 12
+
     APP_NAME: str = "IA-CNPJ API"
     ENV: str = Field(default="lab", validation_alias=AliasChoices("IA_CNPJ_ENV","ENV"))  # lab|prod
     DATABASE_URL: str = Field(default="sqlite:///./lab.db", validation_alias=AliasChoices("IA_CNPJ_DATABASE_URL","DATABASE_URL"))

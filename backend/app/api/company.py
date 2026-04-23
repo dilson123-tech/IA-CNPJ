@@ -8,6 +8,10 @@ from app.deps import get_db
 from app.models.company import Company
 from app.schemas.company import CompanyCreate, CompanyOut
 from app.core.tenant import get_current_tenant_id
+from app.services.company_lookup_service import (
+    get_or_create_company_by_cnpj,
+    normalize_cnpj,
+)
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
@@ -16,11 +20,21 @@ logger = logging.getLogger(__name__)
 
 @router.post("", response_model=CompanyOut, status_code=201)
 def create_company(payload: CompanyCreate, db: Session = Depends(get_db), tenant_id: int = Depends(get_current_tenant_id)):
-    exists = db.scalar(select(Company).where(Company.cnpj == payload.cnpj).where(Company.tenant_id == tenant_id))
+    normalized_cnpj = normalize_cnpj(payload.cnpj)
+
+    exists = db.scalar(
+        select(Company)
+        .where(Company.cnpj == normalized_cnpj)
+        .where(Company.tenant_id == tenant_id)
+    )
     if exists:
         raise HTTPException(status_code=409, detail="CNPJ ja cadastrado")
 
-    c = Company(cnpj=payload.cnpj, razao_social=payload.razao_social, tenant_id=tenant_id)
+    c = Company(
+        cnpj=normalized_cnpj,
+        razao_social=payload.razao_social,
+        tenant_id=tenant_id,
+    )
     db.add(c)
     db.flush()
 
@@ -47,21 +61,11 @@ def get_company_by_cnpj(
     tenant_id: int = Depends(get_current_tenant_id),
 ):
     try:
-        normalized_cnpj = "".join(ch for ch in cnpj if ch.isdigit())
-
-        if len(normalized_cnpj) != 14:
-            raise HTTPException(status_code=422, detail="CNPJ inválido")
-
-        c = db.scalar(
-            select(Company)
-            .where(Company.cnpj == normalized_cnpj)
-            .where(Company.tenant_id == tenant_id)
+        return get_or_create_company_by_cnpj(
+            db=db,
+            tenant_id=tenant_id,
+            cnpj=cnpj,
         )
-
-        if not c:
-            raise HTTPException(status_code=404, detail="Empresa não encontrada")
-
-        return c
 
     except HTTPException:
         raise
