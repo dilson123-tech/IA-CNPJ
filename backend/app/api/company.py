@@ -56,7 +56,7 @@ def list_companies(db: Session = Depends(get_db), tenant_id: int = Depends(get_c
 
 @router.get("/by-cnpj/{cnpj}", response_model=CompanyOut)
 def get_company_by_cnpj(
-    cnpj: str = FastAPIPath(..., min_length=14, max_length=18),
+    cnpj: str = FastAPIPath(...),
     db: Session = Depends(get_db),
     tenant_id: int = Depends(get_current_tenant_id),
 ):
