@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     CNPJ_LOOKUP_BASE_URL: str = "https://brasilapi.com.br/api/cnpj/v1"
     CNPJ_LOOKUP_TIMEOUT_S: int = 12
 
+    ASAAS_ENABLED: bool = Field(default=False, validation_alias=AliasChoices("IA_CNPJ_ASAAS_ENABLED","ASAAS_ENABLED"))
+    ASAAS_API_KEY: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_ASAAS_API_KEY","ASAAS_API_KEY"))
+    ASAAS_BASE_URL: str = Field(default="https://api.asaas.com/v3", validation_alias=AliasChoices("IA_CNPJ_ASAAS_BASE_URL","ASAAS_BASE_URL"))
+    ASAAS_WEBHOOK_TOKEN: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_ASAAS_WEBHOOK_TOKEN","ASAAS_WEBHOOK_TOKEN"))
+    ASAAS_TIMEOUT_S: int = Field(default=20, validation_alias=AliasChoices("IA_CNPJ_ASAAS_TIMEOUT_S","ASAAS_TIMEOUT_S"))
+
     APP_NAME: str = "IA-CNPJ API"
     ENV: str = Field(default="lab", validation_alias=AliasChoices("IA_CNPJ_ENV","ENV"))  # lab|prod
     DATABASE_URL: str = Field(default="sqlite:///./lab.db", validation_alias=AliasChoices("IA_CNPJ_DATABASE_URL","DATABASE_URL"))
@@ -59,6 +65,12 @@ class Settings(BaseSettings):
 
         if self.ENV == "prod" and not self.AUTH_ENABLED:
             raise ValueError("SECURITY: ENV=prod requer AUTH_ENABLED=true (failsafe)")
+
+        if self.ASAAS_ENABLED:
+            if not str(self.ASAAS_API_KEY or "").strip():
+                raise ValueError("SECURITY: ASAAS_API_KEY obrigatório quando ASAAS_ENABLED=true")
+            if not str(self.ASAAS_BASE_URL or "").strip():
+                raise ValueError("SECURITY: ASAAS_BASE_URL obrigatório quando ASAAS_ENABLED=true")
 
         if self.AUTH_ENABLED:
 
