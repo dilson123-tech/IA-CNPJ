@@ -11,6 +11,9 @@ from app.models.company import Company  # noqa: F401
 from app.models.transaction import Transaction  # noqa: F401
 from app.models.category import Category  # noqa: F401
 from app.models.tenant import Tenant, TenantMember  # noqa: F401
+from app.models.person import Person  # noqa: F401
+from app.models.usage_credit import TenantUsageCredit  # noqa: F401
+from app.models.credit_purchase import CreditPurchase  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

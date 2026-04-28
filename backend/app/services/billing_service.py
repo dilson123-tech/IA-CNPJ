@@ -1,0 +1,217 @@
+from datetime import datetime, timezone
+import re
+
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from app.core.settings import settings
+from app.models.credit_purchase import CreditPurchase
+from app.models.tenant import Tenant  # noqa: F401
+from app.models.usage_credit import TenantUsageCredit  # noqa: F401
+from app.schemas.billing import CreateCheckoutRequest
+from app.services.asaas_client import AsaasClient
+from app.services.billing_catalog import get_package
+from app.services.usage_credit_service import UsageCreditService
+
+
+class BillingService:
+    def __init__(self, db: Session):
+        self.db = db
+        self.asaas = AsaasClient()
+
+    def create_checkout(self, tenant_id: int, payload: CreateCheckoutRequest) -> CreditPurchase:
+        pkg = get_package(payload.package_code)
+
+        purchase = CreditPurchase(
+            tenant_id=tenant_id,
+            package_code=pkg["package_code"],
+            credits_amount=pkg["credits_amount"],
+            amount_cents=pkg["amount_cents"],
+            currency=pkg["currency"],
+            provider="asaas",
+            billing_type=payload.billing_type,
+            status="pending",
+            customer_name=payload.customer_name,
+            customer_email=payload.customer_email,
+            customer_cpf_cnpj=payload.customer_cpf_cnpj,
+        )
+        self.db.add(purchase)
+        self.db.flush()
+
+        provider_data = self.asaas.create_payment(
+            customer_name=payload.customer_name,
+            customer_email=payload.customer_email,
+            customer_cpf_cnpj=payload.customer_cpf_cnpj,
+            amount_cents=pkg["amount_cents"],
+            billing_type=payload.billing_type,
+            description=f"Compra de {pkg['credits_amount']} créditos - IA-CNPJ SaaS",
+            external_reference=f"credit_purchase:{purchase.id}:tenant:{tenant_id}",
+        )
+
+        purchase.provider_reference = provider_data.get("provider_reference")
+        purchase.payment_url = provider_data.get("payment_url")
+        purchase.status = provider_data.get("status") or "pending"
+
+        self.db.commit()
+        self.db.refresh(purchase)
+
+        purchase._sandbox_message = provider_data.get("sandbox_message")
+        return purchase
+
+    @staticmethod
+    def validate_asaas_webhook_token(headers: dict) -> None:
+        expected = str(settings.ASAAS_WEBHOOK_TOKEN or "").strip()
+        if not expected:
+            return
+
+        candidates = [
+            str(headers.get("asaas-access-token") or "").strip(),
+            str(headers.get("x-asaas-access-token") or "").strip(),
+            str(headers.get("x-webhook-token") or "").strip(),
+            str(headers.get("authorization") or "").replace("Bearer ", "").strip(),
+        ]
+
+        if expected not in candidates:
+            raise HTTPException(status_code=401, detail="Invalid Asaas webhook token")
+
+    def _find_purchase_from_payload(self, payload: dict) -> CreditPurchase | None:
+        payment = payload.get("payment") or payload or {}
+
+        external_candidates = [
+            str(payment.get("externalReference") or "").strip(),
+            str(payload.get("externalReference") or "").strip(),
+            str(payment.get("external_reference") or "").strip(),
+            str(payload.get("external_reference") or "").strip(),
+        ]
+
+        purchase_id = None
+        for candidate in external_candidates:
+            if not candidate:
+                continue
+            match = re.search(r"credit_purchase:(\d+)", candidate)
+            if match:
+                purchase_id = int(match.group(1))
+                break
+
+        if purchase_id:
+            purchase = (
+                self.db.query(CreditPurchase)
+                .filter(CreditPurchase.id == purchase_id)
+                .first()
+            )
+            if purchase:
+                return purchase
+
+        provider_reference = str(
+            payment.get("id")
+            or payload.get("paymentId")
+            or payload.get("id")
+            or ""
+        ).strip()
+
+        if provider_reference:
+            purchase = (
+                self.db.query(CreditPurchase)
+                .filter(CreditPurchase.provider_reference == provider_reference)
+                .first()
+            )
+            if purchase:
+                return purchase
+
+        return None
+
+    @staticmethod
+    def _is_paid_event(payload: dict) -> bool:
+        payment = payload.get("payment") or payload
+        event = str(payload.get("event") or "").upper()
+        status = str(payment.get("status") or payload.get("status") or "").upper()
+
+        return event in {
+            "PAYMENT_RECEIVED",
+            "PAYMENT_CONFIRMED",
+            "PAYMENT_UPDATED",
+        } or status in {
+            "RECEIVED",
+            "CONFIRMED",
+            "RECEIVED_IN_CASH",
+        }
+
+    def apply_paid_purchase(self, purchase: CreditPurchase) -> tuple[CreditPurchase, bool]:
+        if purchase.credits_applied_at:
+            return purchase, False
+
+        wallet = UsageCreditService(self.db).get_or_create_wallet(purchase.tenant_id)
+        wallet.balance += int(purchase.credits_amount)
+
+        now_utc = datetime.now(timezone.utc)
+        purchase.status = "paid"
+        if not purchase.paid_at:
+            purchase.paid_at = now_utc
+        purchase.credits_applied_at = now_utc
+
+        self.db.commit()
+        self.db.refresh(purchase)
+        self.db.refresh(wallet)
+
+        return purchase, True
+
+    def handle_asaas_webhook(self, payload: dict) -> dict:
+        payment = payload.get("payment") or payload or {}
+        purchase = self._find_purchase_from_payload(payload)
+        if not purchase:
+            return {
+                "ok": True,
+                "matched": False,
+                "applied": False,
+                "reason": "purchase_not_found",
+                "debug_external_reference": (
+                    payment.get("externalReference")
+                    or payload.get("externalReference")
+                    or payment.get("external_reference")
+                    or payload.get("external_reference")
+                ),
+                "debug_provider_reference": (
+                    payment.get("id")
+                    or payload.get("paymentId")
+                    or payload.get("id")
+                ),
+            }
+
+        payment = payload.get("payment") or payload
+        provider_reference = str(
+            payment.get("id")
+            or payload.get("paymentId")
+            or payload.get("id")
+            or ""
+        ).strip()
+
+        if provider_reference and not purchase.provider_reference:
+            purchase.provider_reference = provider_reference
+
+        incoming_status = str(payment.get("status") or payload.get("status") or "").lower().strip()
+        if incoming_status:
+            purchase.status = incoming_status
+
+        if not self._is_paid_event(payload):
+            self.db.commit()
+            self.db.refresh(purchase)
+            return {
+                "ok": True,
+                "matched": True,
+                "applied": False,
+                "purchase_id": purchase.id,
+                "status": purchase.status,
+                "reason": "event_not_paid",
+            }
+
+        purchase, applied = self.apply_paid_purchase(purchase)
+
+        return {
+            "ok": True,
+            "matched": True,
+            "applied": applied,
+            "purchase_id": purchase.id,
+            "tenant_id": purchase.tenant_id,
+            "credits_amount": purchase.credits_amount,
+            "status": purchase.status,
+        }

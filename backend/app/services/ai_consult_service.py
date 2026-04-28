@@ -7,8 +7,72 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.api import reports as rep
-from app.models.transaction import Transaction
 from app.models.category import Category
+from app.models.company import Company
+from app.models.transaction import Transaction
+
+
+def _infer_company_open_status(company: Company) -> bool | None:
+    situacao = (company.situacao_cadastral or "").strip().upper()
+
+    if company.data_baixa:
+        return False
+
+    if situacao in {"ATIVA", "ATIVO"}:
+        return True
+
+    if situacao in {"BAIXADA", "BAIXADO", "INAPTA", "SUSPENSA", "NULA"}:
+        return False
+
+    if (
+        company.situacao_cadastral
+        or company.data_abertura
+        or company.natureza_juridica
+        or company.cnae_principal_codigo
+    ):
+        return None
+
+    return None
+
+
+def _build_company_summary(company: Company | None) -> dict | None:
+    if not company:
+        return None
+
+    return {
+        "cnpj": company.cnpj,
+        "razao_social": company.razao_social,
+        "nome_fantasia": company.nome_fantasia,
+        "situacao_cadastral": company.situacao_cadastral,
+        "data_situacao_cadastral": company.data_situacao_cadastral,
+        "descricao_motivo_situacao_cadastral": company.descricao_motivo_situacao_cadastral,
+        "situacao_especial": company.situacao_especial,
+        "data_situacao_especial": company.data_situacao_especial,
+        "empresa_aberta": _infer_company_open_status(company),
+        "natureza_juridica": company.natureza_juridica,
+        "codigo_natureza_juridica": company.codigo_natureza_juridica,
+        "porte": company.porte,
+        "matriz_filial": company.matriz_filial,
+        "opcao_pelo_simples": company.opcao_pelo_simples,
+        "opcao_pelo_mei": company.opcao_pelo_mei,
+        "capital_social": company.capital_social,
+        "data_abertura": company.data_abertura,
+        "data_baixa": company.data_baixa,
+        "cnae_principal_codigo": company.cnae_principal_codigo,
+        "cnae_principal_descricao": company.cnae_principal_descricao,
+        "municipio": company.municipio,
+        "codigo_municipio_ibge": company.codigo_municipio_ibge,
+        "uf": company.uf,
+        "cep": company.cep,
+        "bairro": company.bairro,
+        "logradouro": company.logradouro,
+        "numero": company.numero,
+        "complemento": company.complemento,
+        "email": company.email,
+        "ddd_telefone_1": company.ddd_telefone_1,
+        "ddd_telefone_2": company.ddd_telefone_2,
+        "qsa": company.qsa,
+    }
 
 
 def run_ai_consult(
@@ -19,10 +83,16 @@ def run_ai_consult(
 ) -> dict:
     rep._ensure_company(db, payload.company_id, tenant_id)
 
+    company = db.scalar(
+        select(Company)
+        .where(Company.id == payload.company_id)
+        .where(Company.tenant_id == tenant_id)
+    )
+
     start_dt, end_dt, period = rep._resolve_period(payload.start, payload.end)
     totals = rep._totals_row(db, payload.company_id, start_dt, end_dt, tenant_id)
     by_cat = rep._by_category(db, payload.company_id, start_dt, end_dt, tenant_id)
-    semcat = next((c for c in by_cat if getattr(c, 'category_id', None) is None), None)
+    semcat = next((c for c in by_cat if getattr(c, "category_id", None) is None), None)
 
     try:
         days_prev = (end_dt.date() - start_dt.date()).days + 1
@@ -82,10 +152,10 @@ def run_ai_consult(
 
     q_desc = (
         select(
-            desc_key.label('k'),
-            func.sum(Transaction.amount_cents).label('sum_cents'),
-            func.count(Transaction.id).label('cnt'),
-            func.max(desc_raw).label('sample'),
+            desc_key.label("k"),
+            func.sum(Transaction.amount_cents).label("sum_cents"),
+            func.count(Transaction.id).label("cnt"),
+            func.max(desc_raw).label("sample"),
         )
         .where(
             Transaction.company_id == payload.company_id,
@@ -93,7 +163,7 @@ def run_ai_consult(
             Transaction.occurred_at.is_not(None),
             Transaction.occurred_at >= start_dt,
             Transaction.occurred_at <= end_dt,
-            Transaction.kind == 'out',
+            Transaction.kind == "out",
         )
         .group_by(desc_key)
         .order_by(func.sum(Transaction.amount_cents).desc(), desc_key.asc())
@@ -103,19 +173,21 @@ def run_ai_consult(
     rows_desc = db.execute(q_desc).all()
     top_desc = []
     for r in rows_desc:
-        sample = (getattr(r, 'sample', '') or getattr(r, 'k', '') or '(sem descrição)').strip()
-        top_desc.append({
-            'sample': sample[:80],
-            'sum': int(getattr(r, 'sum_cents', 0) or 0),
-            'cnt': int(getattr(r, 'cnt', 0) or 0),
-        })
+        sample = (getattr(r, "sample", "") or getattr(r, "k", "") or "(sem descrição)").strip()
+        top_desc.append(
+            {
+                "sample": sample[:80],
+                "sum": int(getattr(r, "sum_cents", 0) or 0),
+                "cnt": int(getattr(r, "cnt", 0) or 0),
+            }
+        )
 
     q_rec = (
         select(
-            desc_key.label('k'),
-            func.sum(Transaction.amount_cents).label('sum_cents'),
-            func.count(Transaction.id).label('cnt'),
-            func.max(desc_raw).label('sample'),
+            desc_key.label("k"),
+            func.sum(Transaction.amount_cents).label("sum_cents"),
+            func.count(Transaction.id).label("cnt"),
+            func.max(desc_raw).label("sample"),
         )
         .where(
             Transaction.company_id == payload.company_id,
@@ -123,7 +195,7 @@ def run_ai_consult(
             Transaction.occurred_at.is_not(None),
             Transaction.occurred_at >= start_dt,
             Transaction.occurred_at <= end_dt,
-            Transaction.kind == 'out',
+            Transaction.kind == "out",
         )
         .group_by(desc_key)
         .having(func.count(Transaction.id) >= 2)
@@ -134,11 +206,11 @@ def run_ai_consult(
     rows_rec = db.execute(q_rec).all()
     recurring = []
     for r in rows_rec:
-        s = (getattr(r, 'sample', '') or getattr(r, 'k', '') or '(sem descrição)').strip()
-        s_sum = int(getattr(r, 'sum_cents', 0) or 0)
-        s_cnt = int(getattr(r, 'cnt', 0) or 0)
+        s = (getattr(r, "sample", "") or getattr(r, "k", "") or "(sem descrição)").strip()
+        s_sum = int(getattr(r, "sum_cents", 0) or 0)
+        s_cnt = int(getattr(r, "cnt", 0) or 0)
         if s_cnt >= 2 and s_sum >= 1000:
-            recurring.append({'sample': s[:80], 'sum': s_sum, 'cnt': s_cnt})
+            recurring.append({"sample": s[:80], "sum": s_sum, "cnt": s_cnt})
 
     entradas = int(getattr(totals, "entradas_cents", 0) or 0)
     saidas = int(getattr(totals, "saidas_cents", 0) or 0)
@@ -213,6 +285,7 @@ def run_ai_consult(
         "insights": insights,
         "risks": risks,
         "actions": actions,
+        "company_summary": _build_company_summary(company),
         "numbers": {
             "entradas_cents": entradas,
             "saidas_cents": saidas,
