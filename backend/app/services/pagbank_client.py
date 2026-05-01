@@ -56,7 +56,7 @@ class PagBankClient:
                 }
             ],
             "notification_urls": [
-                "https://example.com/pagbank-webhook-test"
+                settings.PAGBANK_WEBHOOK_URL
             ],
         }
 

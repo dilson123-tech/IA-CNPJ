@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     PAGBANK_ENABLED: bool = Field(default=False, validation_alias=AliasChoices("IA_CNPJ_PAGBANK_ENABLED","PAGBANK_ENABLED"))
     PAGBANK_TOKEN: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_PAGBANK_TOKEN","PAGBANK_TOKEN"))
     PAGBANK_BASE_URL: str = Field(default="https://sandbox.api.pagseguro.com", validation_alias=AliasChoices("IA_CNPJ_PAGBANK_BASE_URL","PAGBANK_BASE_URL"))
+    PAGBANK_WEBHOOK_URL: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_PAGBANK_WEBHOOK_URL","PAGBANK_WEBHOOK_URL"))
 
     APP_NAME: str = "IA-CNPJ API"
     ENV: str = Field(default="lab", validation_alias=AliasChoices("IA_CNPJ_ENV","ENV"))  # lab|prod
@@ -93,6 +94,8 @@ class Settings(BaseSettings):
                 raise ValueError("SECURITY: PAGBANK_TOKEN obrigatório quando PAGBANK_ENABLED=true")
             if not str(self.PAGBANK_BASE_URL or "").strip():
                 raise ValueError("SECURITY: PAGBANK_BASE_URL obrigatório quando PAGBANK_ENABLED=true")
+            if not str(self.PAGBANK_WEBHOOK_URL or "").strip():
+                raise ValueError("SECURITY: PAGBANK_WEBHOOK_URL obrigatório quando PAGBANK_ENABLED=true")
 
         if self.AUTH_ENABLED:
 
