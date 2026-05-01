@@ -105,3 +105,12 @@ async def mercadopago_webhook(
 ):
     payload = await request.json()
     return BillingService(db).handle_mercadopago_webhook(payload)
+
+
+@public_router.post("/webhook/pagbank")
+async def pagbank_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    payload = await request.json()
+    return BillingService(db).handle_pagbank_webhook(payload)

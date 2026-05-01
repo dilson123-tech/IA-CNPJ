@@ -245,6 +245,82 @@ class BillingService:
         }
 
 
+    def handle_pagbank_webhook(self, payload: dict) -> dict:
+        reference_id = str(payload.get("reference_id") or "").strip()
+        order_id = str(payload.get("id") or "").strip()
+        charges = payload.get("charges") or []
+        charge = charges[0] if charges else {}
+        charge_id = str(charge.get("id") or "").strip()
+        charge_status = str(charge.get("status") or "").upper().strip()
+
+        purchase = None
+
+        if reference_id:
+            match = re.search(r"credit_purchase:(\d+)", reference_id)
+            if match:
+                purchase = (
+                    self.db.query(CreditPurchase)
+                    .filter(CreditPurchase.id == int(match.group(1)))
+                    .first()
+                )
+
+        if not purchase and order_id:
+            purchase = (
+                self.db.query(CreditPurchase)
+                .filter(CreditPurchase.provider_reference == order_id)
+                .first()
+            )
+
+        if not purchase and charge_id:
+            purchase = (
+                self.db.query(CreditPurchase)
+                .filter(CreditPurchase.provider_reference == charge_id)
+                .first()
+            )
+
+        if not purchase:
+            return {
+                "ok": True,
+                "matched": False,
+                "applied": False,
+                "reason": "purchase_not_found",
+                "debug_reference_id": reference_id or None,
+                "debug_order_id": order_id or None,
+                "debug_charge_id": charge_id or None,
+            }
+
+        if order_id and not purchase.provider_reference:
+            purchase.provider_reference = order_id
+
+        if charge_status:
+            purchase.status = charge_status.lower()
+
+        if charge_status != "PAID":
+            self.db.commit()
+            self.db.refresh(purchase)
+            return {
+                "ok": True,
+                "matched": True,
+                "applied": False,
+                "purchase_id": purchase.id,
+                "status": purchase.status,
+                "reason": "event_not_paid",
+            }
+
+        purchase, applied = self.apply_paid_purchase(purchase)
+
+        return {
+            "ok": True,
+            "matched": True,
+            "applied": applied,
+            "purchase_id": purchase.id,
+            "tenant_id": purchase.tenant_id,
+            "credits_amount": purchase.credits_amount,
+            "status": purchase.status,
+            "provider_reference": purchase.provider_reference,
+        }
+
+
     def handle_mercadopago_webhook(self, payload: dict) -> dict:
         action = str(payload.get("action") or "").lower()
         data = payload.get("data") or {}
