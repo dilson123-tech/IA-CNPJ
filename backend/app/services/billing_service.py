@@ -12,6 +12,7 @@ from app.schemas.billing import CreateCheckoutRequest
 from app.services.asaas_client import AsaasClient
 from app.services.billing_catalog import get_package
 from app.services.mercadopago_client import MercadoPagoClient
+from app.services.pagbank_client import PagBankClient
 from app.services.usage_credit_service import UsageCreditService
 
 
@@ -20,11 +21,13 @@ class BillingService:
         self.db = db
         self.asaas = AsaasClient()
         self.mercadopago = MercadoPagoClient()
+        self.pagbank = PagBankClient()
 
     def create_checkout(self, tenant_id: int, payload: CreateCheckoutRequest) -> CreditPurchase:
         pkg = get_package(payload.package_code)
 
-        provider_name = "mercadopago" if self.mercadopago.enabled else "asaas"
+        provider_name = "pagbank" if self.pagbank.enabled else "mercadopago" if self.mercadopago.enabled else "asaas"
+        effective_billing_type = "PIX" if provider_name == "pagbank" else payload.billing_type
 
         purchase = CreditPurchase(
             tenant_id=tenant_id,
@@ -33,7 +36,7 @@ class BillingService:
             amount_cents=pkg["amount_cents"],
             currency=pkg["currency"],
             provider=provider_name,
-            billing_type=payload.billing_type,
+            billing_type=effective_billing_type,
             status="pending",
             customer_name=payload.customer_name,
             customer_email=payload.customer_email,
@@ -44,7 +47,16 @@ class BillingService:
 
         external_reference = f"credit_purchase:{purchase.id}:tenant:{tenant_id}"
 
-        if self.mercadopago.enabled:
+        if self.pagbank.enabled:
+            provider_data = self.pagbank.create_pix_order(
+                title=f"{pkg['credits_amount']} créditos - IA-CNPJ SaaS",
+                amount_cents=pkg["amount_cents"],
+                external_reference=external_reference,
+                customer_name=payload.customer_name,
+                customer_email=payload.customer_email,
+                customer_cpf_cnpj=payload.customer_cpf_cnpj,
+            )
+        elif self.mercadopago.enabled:
             provider_data = self.mercadopago.create_checkout_preference(
                 title=f"{pkg['credits_amount']} créditos - IA-CNPJ SaaS",
                 quantity=1,
