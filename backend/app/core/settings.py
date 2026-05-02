@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     ASAAS_WEBHOOK_TOKEN: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_ASAAS_WEBHOOK_TOKEN","ASAAS_WEBHOOK_TOKEN"))
     ASAAS_TIMEOUT_S: int = Field(default=20, validation_alias=AliasChoices("IA_CNPJ_ASAAS_TIMEOUT_S","ASAAS_TIMEOUT_S"))
 
+    MERCADOPAGO_ENABLED: bool = Field(default=False, validation_alias=AliasChoices("IA_CNPJ_MERCADOPAGO_ENABLED","MERCADOPAGO_ENABLED"))
+    MERCADOPAGO_ACCESS_TOKEN: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_MERCADOPAGO_ACCESS_TOKEN","MERCADOPAGO_ACCESS_TOKEN"))
+    MERCADOPAGO_BASE_URL: str = Field(default="https://api.mercadopago.com", validation_alias=AliasChoices("IA_CNPJ_MERCADOPAGO_BASE_URL","MERCADOPAGO_BASE_URL"))
+    MERCADOPAGO_WEBHOOK_SECRET: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_MERCADOPAGO_WEBHOOK_SECRET","MERCADOPAGO_WEBHOOK_SECRET"))
+    MERCADOPAGO_TIMEOUT_S: int = Field(default=20, validation_alias=AliasChoices("IA_CNPJ_MERCADOPAGO_TIMEOUT_S","MERCADOPAGO_TIMEOUT_S"))
+
+    PAGBANK_ENABLED: bool = Field(default=False, validation_alias=AliasChoices("IA_CNPJ_PAGBANK_ENABLED","PAGBANK_ENABLED"))
+    PAGBANK_TOKEN: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_PAGBANK_TOKEN","PAGBANK_TOKEN"))
+    PAGBANK_BASE_URL: str = Field(default="https://sandbox.api.pagseguro.com", validation_alias=AliasChoices("IA_CNPJ_PAGBANK_BASE_URL","PAGBANK_BASE_URL"))
+    PAGBANK_WEBHOOK_URL: str = Field(default="", validation_alias=AliasChoices("IA_CNPJ_PAGBANK_WEBHOOK_URL","PAGBANK_WEBHOOK_URL"))
+
     APP_NAME: str = "IA-CNPJ API"
     ENV: str = Field(default="lab", validation_alias=AliasChoices("IA_CNPJ_ENV","ENV"))  # lab|prod
     DATABASE_URL: str = Field(default="sqlite:///./lab.db", validation_alias=AliasChoices("IA_CNPJ_DATABASE_URL","DATABASE_URL"))
@@ -71,6 +82,20 @@ class Settings(BaseSettings):
                 raise ValueError("SECURITY: ASAAS_API_KEY obrigatório quando ASAAS_ENABLED=true")
             if not str(self.ASAAS_BASE_URL or "").strip():
                 raise ValueError("SECURITY: ASAAS_BASE_URL obrigatório quando ASAAS_ENABLED=true")
+
+        if self.MERCADOPAGO_ENABLED:
+            if not str(self.MERCADOPAGO_ACCESS_TOKEN or "").strip():
+                raise ValueError("SECURITY: MERCADOPAGO_ACCESS_TOKEN obrigatório quando MERCADOPAGO_ENABLED=true")
+            if not str(self.MERCADOPAGO_BASE_URL or "").strip():
+                raise ValueError("SECURITY: MERCADOPAGO_BASE_URL obrigatório quando MERCADOPAGO_ENABLED=true")
+
+        if self.PAGBANK_ENABLED:
+            if not str(self.PAGBANK_TOKEN or "").strip():
+                raise ValueError("SECURITY: PAGBANK_TOKEN obrigatório quando PAGBANK_ENABLED=true")
+            if not str(self.PAGBANK_BASE_URL or "").strip():
+                raise ValueError("SECURITY: PAGBANK_BASE_URL obrigatório quando PAGBANK_ENABLED=true")
+            if not str(self.PAGBANK_WEBHOOK_URL or "").strip():
+                raise ValueError("SECURITY: PAGBANK_WEBHOOK_URL obrigatório quando PAGBANK_ENABLED=true")
 
         if self.AUTH_ENABLED:
 
