@@ -166,6 +166,10 @@ class BillingService:
 
     def apply_paid_purchase(self, purchase: CreditPurchase) -> tuple[CreditPurchase, bool]:
         if purchase.credits_applied_at:
+            if purchase.status != "paid":
+                purchase.status = "paid"
+                self.db.commit()
+                self.db.refresh(purchase)
             return purchase, False
 
         wallet = UsageCreditService(self.db).get_or_create_wallet(purchase.tenant_id)
