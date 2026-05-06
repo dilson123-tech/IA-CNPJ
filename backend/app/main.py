@@ -1,3 +1,5 @@
+import os
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
@@ -41,18 +43,39 @@ app = FastAPI(
     openapi_url=None,
 )
 
+DEFAULT_CORS_ALLOW_ORIGINS = [
+    "http://127.0.0.1:4173",
+    "http://localhost:4173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+    "http://127.0.0.1:5175",
+    "http://localhost:5175",
+    "https://ia-cnpj.vercel.app",
+]
+
+
+def get_cors_allow_origins() -> list[str]:
+    raw = (
+        os.getenv("IA_CNPJ_CORS_ALLOW_ORIGINS")
+        or os.getenv("CORS_ALLOW_ORIGINS")
+        or ""
+    )
+
+    configured = [
+        origin.strip()
+        for origin in raw.split(",")
+        if origin.strip()
+    ]
+
+    return list(dict.fromkeys(DEFAULT_CORS_ALLOW_ORIGINS + configured))
+
+
 # Auth router sempre exposto (login precisa existir)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:4173",
-        "http://localhost:4173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:5174",
-        "http://localhost:5174",
-        "https://ia-cnpj.vercel.app",
-    ],
+    allow_origins=get_cors_allow_origins(),
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
