@@ -359,6 +359,21 @@ def _lookup_company_external(cnpj: str) -> dict | None:
     )
 
 
+def _company_needs_business_enrichment(company: Company) -> bool:
+    business_fields = (
+        company.situacao_cadastral,
+        company.cnae_principal_codigo,
+        company.cnae_principal_descricao,
+        company.municipio,
+        company.uf,
+        company.capital_social,
+        company.natureza_juridica,
+        company.porte,
+        company.data_abertura,
+    )
+    return not any(value is not None and str(value).strip() for value in business_fields)
+
+
 def get_or_create_company_by_cnpj(
     *,
     db: Session,
@@ -370,10 +385,24 @@ def get_or_create_company_by_cnpj(
         tenant_id=tenant_id,
         cnpj=cnpj,
     )
+
     if company:
+        if not _company_needs_business_enrichment(company):
+            return company
+
+        try:
+            external = _lookup_company_external(cnpj)
+        except HTTPException:
+            return company
+
+        if external:
+            _apply_company_business_data(company, external)
+            db.commit()
+            db.refresh(company)
         return company
 
     external = _lookup_company_external(cnpj)
+
     if not external:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
