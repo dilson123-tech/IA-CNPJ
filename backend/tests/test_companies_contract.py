@@ -70,6 +70,11 @@ def test_get_company_by_cnpj_auto_lookup_creates_company(client, monkeypatch):
         return {
             "cnpj": normalized,
             "razao_social": f"Empresa Auto {suffix}",
+            "situacao_cadastral": "ATIVA",
+            "cnae_principal_codigo": "6201501",
+            "cnae_principal_descricao": "Desenvolvimento de programas de computador sob encomenda",
+            "municipio": "ITAPOA",
+            "uf": "SC",
         }
 
     from app.services import company_lookup_service as lookup_service
